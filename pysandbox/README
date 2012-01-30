@@ -1,0 +1,51 @@
+INTRODUCTION
+  
+  The sandbox libraries (libsandbox & pysandbox) provide API's in C/C++/Python 
+  for executing simple (single process) programs in a restricted environment, or
+  sandbox. Runtime behaviours of binary executable programs can be captured and 
+  blocked according to configurable / programmable policies.
+
+  The sandbox libraries are distributed under the terms of the New BSD license, 
+  please refer to the plain text file named COPYING in individual packages.
+  
+  Project Homepage: http://openjudge.net/~liuyu/Project/LibSandbox
+  Author: LIU Yu, <pineapple.liu@gmail.com>
+
+FEATURES
+  
+  1. captures system calls with arguments from *sandboxed* binary programs in 
+     runtime, and blocks malicious actions through user-defined policy modules;
+  2. specifies quota of various resources allocated to the *sandboxed* program, 
+     including cpu and wallclock time, memory, and output;
+  3. minimizes privileges of the *sandboxed* program, and isolates its execution
+     from critical parts of the operating system;
+
+INSTALLATION
+  
+  binary packages (CentOS/RedHat)
+  
+  $ yum install --nogpgcheck pysandbox-<version>.<platform>.rpm
+  
+  binary packages (Ubuntu)
+  
+  $ sudo apt-get install rpm
+  $ rpm -Uvh --nodeps pysandbox-<version>.<platform>.rpm
+  
+  source package
+  
+  $ tar -xzvf pysandbox-<version>.tar.gz
+  $ cd pysandbox-<version>
+  $ python setup.py build
+  $ sudo python setup.py install
+
+GETTING STARTED
+  
+  $ python sample2.py
+
+CONTACT
+  
+  Project Homepage: http://openjudge.net/~liuyu/Project/LibSandbox
+  Project Page at SourceForge.net: http://sourceforge.net/projects/libsandbox/
+  Project Page at Google Code: http://code.google.com/p/libsandbox/
+  Project Mail List at Google Groups: http://groups.google.com/group/open-judge
+  Author: LIU Yu, <pineapple.liu@gmail.com>

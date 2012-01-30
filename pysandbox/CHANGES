@@ -1,0 +1,187 @@
+[2011/12/15] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.c fixed FUNC_{BEGIN,END} macros in comply with rc3
+  * in setup.{py,cfg} updated version to 0.3.3-rc3
+
+[2011/12/05] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.c added __author__ from compile-time macro AUTHOR
+  * in sandbox/module.c added signal_info field in the return of probe() and 
+    pushed 'signal' field generation to the probe() method of the wapper class
+    in sandbox/__init__.py
+  * abandoned planned support of multi-process task
+
+[2011/11/30] LIU Yu, <pineapple.liu@gmail.com>
+  * moved version definition from __init__.py to compile-time macro VERSION
+  * in setup.{py,cfg} updated version to 0.3.3-rc2
+
+[2011/11/10] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.c fixed 64-32 bit conversion error
+  * in sandbox/module.c changed SandboxEvent.ext0 binding
+  * in sandbox/__init__.py and setup.{py,cfg} updated version to 0.2.3-1
+
+[2011/11/08] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.c pushed most probe() fields to the probe() method of
+    the wrapper class in sandbox/__init__.py
+  * in sandbox/__init__.py and setup.{py,cfg} updated version to 0.2.2-1
+
+[2011/11/07] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.c added a new case for handling S_QUOTA_PROCESS 
+    in SandboxPolicy_default_policy()
+  * in sandbox/module.c exorted S_RESULT_R[0-5] and S_STATUS_S[0-2] from 
+    libsandbox-0.3.2
+  * in sandbox/module.c/Sandbox_policy_entry() changed sandbox result 
+    from S_RESULT_IE to S_RESULT_R0
+  * in sandbox/__init__.py added an alias of S_RESULT_R0 as _BP 
+  * in sandbox/__init__.py and setup.{py,cfg} updated version to 0.2.1-1
+
+[2011/11/04] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.c fixed Sandbox_init_qta()
+  * in sandbox/__init__.py and setup.{py,cfg} updated version to 0.2.0-2
+
+[2011/11/03] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.c added S_RESULT_PL and S_QUOTA_PROCESS in sync 
+    with new constants added in libsandbox-0.3.0
+  * in sandbox/__init__.py and setup.{py,cfg} updated version to 0.2.0-1
+
+[2011/08/27] LIU Yu, <pineapple.liu@gmail.com>
+  * in setup.py updated project description
+  
+[2011/08/23] LIU Yu, <pineapple.liu@gmail.com>
+  * replaced MANIFEST with MANIFEST.in
+  * in sandbox/__init__.py and setup.{py,cfg} update version to 0.1.12-2
+
+[2009/12/03] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.c moved Sandbox.conv() method to a module method
+    sandbox.conv()
+  * in sandbox/__init__.py and setup.{py,cfg} update version to 0.1.12-1
+
+[2009/11/27] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.c added a statistics variable vsize_peak
+  * in sandbox/__init__.py and setup.{py,cfg} update version to 0.1.11-1
+
+[2009/11/10] LIU Yu, <pineapple.liu@gmail.com>
+  * in setup.cfg rpm package now provides pysandbox
+  * in sandbox/__init__.py and setup.{py,cfg} update version to 0.1.10-7
+
+[2009/10/28] LIU Yu, <pineapple.liu@gmail.com>
+  * updated copyright notice in source files
+  * in sandbox/__init__.py and setup.{py,cfg} update version to 0.1.10-6
+
+[2007/02/02] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/__init__.py and setup.{py,cfg} update version to 0.1.10-5
+
+[2007/02/02] LIU Yu, <pineapple.liu@gmail.com>
+  * updated years in copyright notices to 2004-2007
+
+[2007/01/21] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.c corrected local prototype of proc_probe() to reflect
+    changes in the C lib
+  * in sandbox/__init__.py and setup.{py,cfg} update version to 0.1.10-4
+
+[2007/01/06] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.c corrected local prototype of proc_dump() to reflect
+    changes in the C lib
+  * in sandbox/module.c enabled dumping T_LONG objects in Sandbox_probe()
+  * in sandbox/__init__.py and setup.{py,cfg} update version to 0.1.10-3
+
+[2007/01/05] LIU Yu, <pineapple.liu@mgail.com>
+  * in sandbox/__init__.py and setup.{py,cfg} update version to 0.1.10-2
+
+[2007/01/04] LIU Yu, <pineapple.liu@gmail.com>
+  * in setup.py removed WITH_NATIVE_MONITOR macro definition
+  * in sandbox/module.c enabled dumping T_INT and T_STRING objects in 
+    Sandbox_probe()
+  * in sandbox/__init__.py and setup.{py,cfg} update version to 0.1.10-1
+
+[2007/01/02] LIU Yu, <pineapple.liu@gmail.com>
+  * in MANIFEST reverted sandbox/*.{h,c} to sandbox/module.{h,c}
+  * in sandbox/module.c release mutex locks on sbox when probe() and 
+    dump() failes
+  * in sandbox/__init__.py and setup.{py,cfg} update version to 0.1.9-3
+
+[2006/12/31] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.c settled the framework of Sandbox_dump()
+  * in MANIFEST changed sandbox/module.{h,c} to sandbox/*.{h,c}
+  * in sandbox/__init__.py and setup.{py,cfg} update version to 0.1.9-2
+
+[2006/12/29] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.c changed the concurrency control of Sandbox_probe()
+    enabling it to be called within a policy
+  * in sandbox/__init__.py and setup.{py,cfg} update version to 0.1.8a-2
+  * in sandbox/module.c renamed `ex?' members of SandboxEvent to `ext?'
+  * in sandbox/module.c added a new `dump' method to Sandbox for obtaining
+    data from the memory space of targeted program
+  * in sandbox/module.c added datatype constants T_{BYTE,SHORT,INT,LONG},
+    T_{UBYTE,USHORT,UINT,ULONG} T_{FLOAT,DOUBLE,CHAR,STRING} to the dict 
+    of SandboxType
+  * in sandbox/__init__.py import the above datatype to module namespace
+  * in sandbox/__init__.py and setup.{py,cfg} update version to 0.1.9-1
+
+[2006/12/05] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.c added `ex[0-6]' members to the SandboxEvent object
+  * in sandbox/module.c fixed a debug message that causes compile error
+  * in sandbox/__init__.py and setup.{py,cfg} update version to 0.1.8a-1
+
+[2006/04/12] LIU Yu, <pineapple.liu@gmail.com>
+  * unbrella project renamed to libsandbox at sourceforge.net
+  * changed copyright notices and other namings in source files accordingly
+
+[2006/03/25] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/__init__.py and setup.{py,cfg} update version to 0.1.7-4
+  * in sandbox/module.c replaced PyInt_AsUnsignedLongMask into PyInt_AsLong
+  * in sandbox/module.c cast the 2nd param of PyDict_GetItemString to (char *)
+
+[2006/03/23] LIU Yu, <pineapple.liu@gmail.com>
+  * moved most python-independent C sources into a new libsandbox module, and
+    modified setup.py accordingly.
+  * in sandbox/__init__.py and setup.{py,cfg} update version to 0.1.7-3
+
+[2006/03/22] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox.{h,c}, revised the design of policy consulting mechanisms.
+  * in sandbox/__init__.py and setup.{py,cfg} update version to 0.1.7-1
+  * in sandbox/__init__.py and setup.{py,cfg} update version to 0.1.7-2
+  
+[2006/02/28] LIU Yu, <pineapple.liu@gmail.com>
+  * moved message directives from sandbox/message.h to sandbox/module.h
+  * removed sandbox/message.h
+  * in sandbox/__init__.py and setup.{py,cfg} update version to 0.1.6a-6
+  * removed sandbox/util.py, scripts/ (to distribute as pysandbox-tools)
+  * updated setup.py setup.{py,cfg} and MANIFEST accordingly
+  * updated vendor name in each copyright declearations
+  
+[2006/02/12] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/sandbox.c, applied core file limit before execve
+  * in sandbox/sandbox.h changed the size of command_t.buff to ARG_MAX
+  * in sandbox/sandbox.c wrapped the __sandbox_tracer with a WITH_NATIVE_TRACER
+    directive
+  * in sandbox/sandbox.xml revised the default template
+  * in script/sbox revised the template stub
+  * in sandbox/__init__.py and setup.{py,cfg} update version to 0.1.6a-5
+  
+[2006/02/11] LIU Yu, <pineapple.liu@gmail.com>
+  * fixed a bug in the monitor where early arrived events will not be handled,
+    and the monitor falls in infinite wait
+  * in sandbox/__init__.py and setup.{py,cfg} update version to 0.1.6a-4
+  * applied dual flush_cache() in the tracer
+  
+[2006/02/10] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/sandbox.c, splitted UPDATE_STATE to UPDATE_RESULT and 
+    UPDATE_STATUS, and the sandbox now change to FIN status after the stopped
+    time stamp is collected
+  * in sandbox/sandbox.c, altered the sandbox_check() to support restart of a 
+    sandbox. a finished sandbox will have its statistics and result cleared
+
+[2006/02/10] LIU Yu, <pineapple.liu@gmail.com>
+  * created this file CHANGES
+  * created sandbox/sandbox.xml and added it to setup.py as package data of the
+    sandbox package
+  * in sandbox/module.c, Sandbox_probe() can now correctly probe a running 
+    sandbox
+  * in sandbox/module.c added a number of new fields *mem.majflt*, *mem.minflt*, 
+    *mem.nswap* and removed the *nsyscall* field from the probe result
+  * created sandbox/__init__.py that wraps the extension module of sandbox
+  * created sandbox/util.py and moved some of the reuseable code of script/sbox
+    into it
+  * in MANIFEST, added entries for the newly added files
+  * in setup.{py,cfg} and script/sbox updated version to 0.1.6a-2
+  * in script/sbox fixed smart_open to sandbox.util.smart_open
+  * in sandbox/__init__.py and setup.{py,cfg} update version to 0.1.6a-3

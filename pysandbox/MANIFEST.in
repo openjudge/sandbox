@@ -1,0 +1,9 @@
+include README
+include COPYING
+include CHANGES
+include MANIFEST.in
+include setup.cfg
+include setup.py
+recursive-include sandbox *.h
+recursive-include sandbox *.c
+recursive-include sandbox *.py

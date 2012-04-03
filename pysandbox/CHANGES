@@ -1,3 +1,14 @@
+[2012/04/03] LIU Yu, <pineapple.liu@gmail.com>
+  * in setup.{py,cfg} updated version to 0.3.3-rc5
+
+[2012/03/27] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.c removed SandboxPolicy_default_policy() and applied
+    sandbox_default_policy() from libsandbox
+
+[2012/03/26] LIU Yu, <pineapple.liu@gmail.com>
+  * in setup.cfg stated conflict with pysandbox-ext
+  * in setup.{py,cfg} updated version to 0.3.3-rc4
+
 [2011/12/15] LIU Yu, <pineapple.liu@gmail.com>
   * in sandbox/module.c fixed FUNC_{BEGIN,END} macros in comply with rc3
   * in setup.{py,cfg} updated version to 0.3.3-rc3

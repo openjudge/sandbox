@@ -1,3 +1,45 @@
+[2012/04/03] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox.c revised tracer / watcher interaction flow and resolved a dead-
+    lock in the old implementation of FLUSH_ALL_EVENTS(); a new feature of the
+    watcher is to set the result to BP and exit the watching loop when a) the 
+    prisoner process is already gone (and the tracer exited its main loop), and 
+    b) the policy still want the sandbox to CONT
+  * in configure.in and sandbox.spec updated version to 0.3.3-rc5
+
+[2012/03/31] LIU Yu, <pineapple.liu@gmail.com>
+  * in platform.c implemented trace_kill() opcode rewrite
+  * in sandbox.c renamed MONITOR_SINK() -> FLUSH_ALL_EVENTS()
+  * in platform.c renamed __trace() -> __trace_impl(), renamed __trace_async() 
+    -> __trace(), and removed trace proxy selection
+
+[2012/03/30] LIU Yu, <pineapple.liu@gmail.com>
+  * in platform.h revised comments of trace_*() and proc_*() functions
+  * in platform.c discarded T_KILL trace option and trace_kill() no longer does 
+    syscall-rewite; in its current implementation, trace_kill() is equivalent
+    to kill(-pid, SIGKILL); we plan to add a T_SETDATA trace option and adopt 
+    opcode rewrite that changes the instructions at [EIP/RIP] to NOP (0x90)
+  * in sandbox.c renamed CLEAR_EVENTS() -> MONITOR_SINK() to reflect the actual 
+    functionality, trace_kill() is now invoked from the watcher thread rather
+    than from the tracer thread
+
+[2012/03/27] LIU Yu, <pineapple.liu@gmail.com>
+  * in platform.c added function syscall_mode() for system call mode inspection
+  * in configure.in, added a new --enable-chkvsc option to turn on vsyscall
+    opcode inspection in syscall_mode()
+  * in platform.h macro SCMODE is renamed THE_SCMODE and uses syscall_mode()
+  * in sandbox.c moved illegal scmode detection from the main tracing loop to 
+    the default policy, and renamed the latter to sandbox_default_policy()
+  * in sandbox.c made sandbox_default_policy() reject SYS_*fork, SYS_clone, 
+    SYS_ptrace, and SYS_wait* system calls by default
+
+[2012/03/26] LIU Yu, <pineapple.liu@gmail.com>
+  * install the core library to configurable $(libdir) instead of $(prefix)/lib,
+    and in sandbox.spec added libsandbox.so(TAG)(BIT) to the *provides* list of 
+    the rpm package, this fixes a rpm dependency lookup error on x86_64
+  * in platform.h patched SCMODE detection code for x86_64 to capture
+    *JMP <__kernel_vsyscall+3>*-style system call entrance
+  * in configure.in and sandbox.spec updated version to 0.3.3-rc4
+
 [2011/12/15] LIU Yu, <pineapple.liu@gmail.com>
   * simplified FUNC_{BEGIN,RET} macros
   * in configure.in and sandbox.spec updated version to 0.3.3-rc3

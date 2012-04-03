@@ -52,6 +52,11 @@ except AssertionError, e:
     sys.stderr.write(str(e))
     sys.exit(os.EX_UNAVAILABLE)
 
+# result code translation
+def result_name(r):
+    return ('PD', 'OK', 'RF', 'ML', 'OL', 'TL', 'RT', 'AT', 'IE', 'BP')[r] \
+        if r in xrange(10) else None
+
 def main(args):
     # sandbox configuration
     cookbook = {
@@ -64,25 +69,23 @@ def main(args):
                       memory = 8388608, #  8 MB
                       disk = 1048576)}  #  1 MB
     # create a sandbox instance and execute till end
-    sbox = MiniSandbox(**cookbook)
-    sbox.run()
+    msb = MiniSandbox(**cookbook)
+    msb.run()
     # verbose statistics
     sys.stderr.write("result: %(result)s\ncpu: %(cpu)dms\nmem: %(mem)dkB\n" % \
-        sbox.probe())
+        msb.probe())
     return os.EX_OK
-
-# safe list of linux syscall no.
-sc_safe = dict(i686 = set([3, 4, 19, 45, 54, 90, 91, 122, 125, 140, 163, 192, \
-    197, 224, 243, 252, ]), x86_64 = set([0, 1, 5, 8, 9, 10, 11, 12, 16, 25, \
-    63, 158, 231, ]), )
 
 # mini sandbox with embedded policy
 class MiniSandbox(SandboxPolicy,Sandbox):
     sc_table = None
+    sc_safe = dict(i686 = set([3, 4, 19, 45, 54, 90, 91, 122, 125, 140, 163, \
+        192, 197, 224, 243, 252, ]), x86_64 = set([0, 1, 5, 8, 9, 10, 11, 12, \
+        16, 25, 63, 158, 231, ]), ) # white list of essential linux syscalls
     def __init__(self, *args, **kwds):
         # initialize table of system call rules
         self.sc_table = [self._KILL_RF, ] * 1024
-        for scno in sc_safe[machine]:
+        for scno in MiniSandbox.sc_safe[machine]:
             self.sc_table[scno] = self._CONT
         # initialize as a polymorphic sandbox-and-policy object
         kwds['policy'] = self
@@ -109,11 +112,6 @@ class MiniSandbox(SandboxPolicy,Sandbox):
     def _KILL_RF(self, e, a): # restricted func.
         a.type, a.data = S_ACTION_KILL, S_RESULT_RF
         return a
-
-# result code translation
-def result_name(r):
-    return ('PD', 'OK', 'RF', 'ML', 'OL', 'TL', 'RT', 'AT', 'IE', 'BP')[r] \
-        if r in xrange(10) else None
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

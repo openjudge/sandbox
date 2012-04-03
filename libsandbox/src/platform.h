@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2004-2009, 2011 LIU Yu, pineapple.liu@gmail.com               *
+ * Copyright (C) 2004-2009, 2011, 2012 LIU Yu, pineapple.liu@gmail.com         *
  * All rights reserved.                                                        *
  *                                                                             *
  * Redistribution and use in source and binary forms, with or without          *
@@ -75,14 +75,14 @@ typedef enum
 #define MAKE_WORD(a,b) \
     ((long)(((int)(a)) | (((long)((int)(b))) << 32))) \
 /* MAKE_WORD */
-#define OPCODE(op) \
+#define OPCODE16(op) \
     ((unsigned long)(op) & (~((unsigned long)(~0LU << 16)))) \
-/* OPCODE */
+/* OPCODE16 */
 #define OP_INT80                0x80cd
 #define OP_SYSCALL              0x050f
 #define OP_SYSENTER             0x340f
-#define NAX                     RAX
-#define ORIG_NAX                ORIG_RAX
+#define NAX                     rax
+#define ORIG_NAX                orig_rax
 #endif /* __x86_64__ */
 
 #ifdef __i386__
@@ -93,13 +93,13 @@ typedef enum
 #define MAKE_WORD(a,b) \
     ((long)(((short)(a)) | (((long)((short)(b))) << 16))) \
 /* MAKE_WORD */
-#define OPCODE(op) \
+#define OPCODE16(op) \
     ((unsigned long)(op) & (~((unsigned long)(~0LU << 16)))) \
-/* OPCODE */
+/* OPCODE16 */
 #define OP_INT80                0x80cd
 #define OP_SYSENTER             0x340f
-#define NAX                     EAX
-#define ORIG_NAX                ORIG_EAX
+#define NAX                     eax
+#define ORIG_NAX                orig_eax
 #endif /* __i386__ */
 
 #ifndef SUPPORTED_ARCH
@@ -182,66 +182,45 @@ typedef struct
 #define RVAL_ELSE               ):(
 #define RVAL_FI                 ))
 
-#define SET_IN_SYSCALL(pproc) \
-{{{ \
-    (pproc)->tflags.is_in_syscall = true; \
-    (pproc)->tflags.not_wait_execve = true; \
-}}} /* SET_IN_SYSCALL */
-
 #define NOT_WAIT_EXECVE(pproc) \
     ((pproc)->tflags.not_wait_execve++) \
 /* NOT_WAIT_EXECVE */
 
 #ifdef __linux__
 
-#ifdef __x86_64__
+int syscall_mode(proc_t * const);
 
-/* int80 and sysenter always maps in 32bit system call table regardless of the 
- * value of CS c.f. http://scary.beasts.org/security/CESA-2009-001.html */
+#define THE_SCMODE(pproc) \
+    RVAL_IF(!((pproc)->tflags.is_in_syscall) && \
+            ((pproc)->tflags.not_wait_execve)) \
+        (pproc)->tflags.syscall_mode = syscall_mode(pproc) \
+    RVAL_ELSE \
+        (pproc)->tflags.syscall_mode \
+    RVAL_FI \
+/* THE_SCMODE */
+
+#define THE_SYSCALL(pproc) \
+    RVAL_IF(((pproc)->tflags.single_step) && !((pproc)->tflags.is_in_syscall)) \
+        MAKE_WORD((pproc)->regs.NAX, THE_SCMODE(pproc)) \
+    RVAL_ELSE \
+        MAKE_WORD((pproc)->regs.ORIG_NAX, THE_SCMODE(pproc)) \
+    RVAL_FI \
+/* THE_SYSCALL */
+
+#ifdef __x86_64__
 
 #define SCMODE_LINUX64          0
 #define SCMODE_LINUX32          1
 #define SCMODE_MAX              2
 
-#define SCMODE(pproc) \
-    RVAL_IF(!((pproc)->tflags.is_in_syscall)) \
-        ((pproc)->tflags.syscall_mode = \
-            RVAL_IF((OPCODE((pproc)->op) == OP_INT80) || \
-                    (OPCODE((pproc)->op) == OP_SYSENTER)) \
-                SCMODE_LINUX32 \
-            RVAL_ELSE \
-                RVAL_IF(OPCODE((pproc)->op) == OP_SYSCALL) \
-                    RVAL_IF((pproc)->regs.cs == 0x33) \
-                        SCMODE_LINUX64 \
-                    RVAL_ELSE \
-                        RVAL_IF((pproc)->regs.cs == 0x23) \
-                            SCMODE_LINUX32 \
-                        RVAL_ELSE \
-                            SCMODE_MAX \
-                        RVAL_FI \
-                    RVAL_FI \
-                RVAL_ELSE \
-                    SCMODE_MAX \
-                RVAL_FI \
-            RVAL_FI) \
-    RVAL_ELSE \
-        ((pproc)->tflags.syscall_mode) \
-    RVAL_FI \
-/* SCMODE */
-
-#define THE_SYSCALL(pproc) \
-    RVAL_IF(((pproc)->tflags.single_step) && !((pproc)->tflags.is_in_syscall)) \
-        MAKE_WORD((pproc)->regs.rax, SCMODE(pproc)) \
-    RVAL_ELSE \
-        MAKE_WORD((pproc)->regs.orig_rax, SCMODE(pproc)) \
-    RVAL_FI \
-/* THE_SYSCALL */
-
 #define SC_EXECVE               MAKE_WORD(SYS_execve, SCMODE_LINUX64)
 #define SC_FORK                 MAKE_WORD(SYS_fork, SCMODE_LINUX64)
 #define SC_VFORK                MAKE_WORD(SYS_vfork, SCMODE_LINUX64)
 #define SC_CLONE                MAKE_WORD(SYS_clone, SCMODE_LINUX64)
+#define SC_PTRACE               MAKE_WORD(SYS_ptrace, SCMODE_LINUX64)
+#ifdef SYS_waitpid
 #define SC_WAITPID              MAKE_WORD(SYS_waitpid, SCMODE_LINUX64)
+#endif /* SYS_waitpid */
 #define SC_WAIT4                MAKE_WORD(SYS_wait4, SCMODE_LINUX64)
 #define SC_WAITID               MAKE_WORD(SYS_waitid, SCMODE_LINUX64)
 #define SC_EXIT                 MAKE_WORD(SYS_exit, SCMODE_LINUX64)
@@ -254,6 +233,7 @@ typedef struct
 #define SC32_FORK               MAKE_WORD(2, SCMODE_LINUX32)
 #define SC32_VFORK              MAKE_WORD(190, SCMODE_LINUX32)
 #define SC32_CLONE              MAKE_WORD(120, SCMODE_LINUX32)
+#define SC32_PTRACE             MAKE_WORD(26, SCMODE_LINUX32)
 #define SC32_WAITPID            MAKE_WORD(7, SCMODE_LINUX32)
 #define SC32_WAIT4              MAKE_WORD(114, SCMODE_LINUX32)
 #define SC32_WAITID             MAKE_WORD(284, SCMODE_LINUX32)
@@ -262,9 +242,9 @@ typedef struct
 
 #define IS_SYSCALL(pproc) \
     RVAL_IF((pproc)->tflags.single_step) \
-        ((OPCODE((pproc)->op) == OP_SYSCALL) || \
-         (OPCODE((pproc)->op) == OP_SYSENTER) || \
-         (OPCODE((pproc)->op) == OP_INT80)) \
+        ((OPCODE16((pproc)->op) == OP_SYSCALL) || \
+         (OPCODE16((pproc)->op) == OP_SYSENTER) || \
+         (OPCODE16((pproc)->op) == OP_INT80)) \
     RVAL_ELSE \
         (((pproc)->siginfo.si_signo == SIGTRAP) && \
          ((pproc)->siginfo.si_code != SI_USER)) \
@@ -273,9 +253,9 @@ typedef struct
 
 #define IS_SYSRET(pproc) \
     RVAL_IF((pproc)->tflags.single_step) \
-        ((OPCODE((pproc)->op) != OP_SYSCALL) && \
-         (OPCODE((pproc)->op) != OP_SYSENTER) && \
-         (OPCODE((pproc)->op) != OP_INT80) && \
+        ((OPCODE16((pproc)->op) != OP_SYSCALL) && \
+         (OPCODE16((pproc)->op) != OP_SYSENTER) && \
+         (OPCODE16((pproc)->op) != OP_INT80) && \
          ((pproc)->tflags.is_in_syscall)) \
     RVAL_ELSE \
         (((pproc)->siginfo.si_signo == SIGTRAP) && \
@@ -284,54 +264,61 @@ typedef struct
 /* IS_SYSRET */
 
 #define SYSCALL_ARG1(pproc) \
-    RVAL_IF(SCMODE(pproc) == SCMODE_LINUX64) \
+    RVAL_IF(THE_SCMODE(pproc) == SCMODE_LINUX64) \
         ((pproc)->regs.rdi) \
     RVAL_ELSE \
         MAKE_WORD((pproc)->regs.rbx, 0) \
     RVAL_FI \
 /* SYSCALL_ARG1 */
 #define SYSCALL_ARG2(pproc) \
-    RVAL_IF(SCMODE(pproc) == SCMODE_LINUX64) \
+    RVAL_IF(THE_SCMODE(pproc) == SCMODE_LINUX64) \
         ((pproc)->regs.rsi) \
     RVAL_ELSE \
         MAKE_WORD((pproc)->regs.rcx, 0) \
     RVAL_FI \
 /* SYSCALL_ARG2 */
 #define SYSCALL_ARG3(pproc) \
-    RVAL_IF(SCMODE(pproc) == SCMODE_LINUX64) \
+    RVAL_IF(THE_SCMODE(pproc) == SCMODE_LINUX64) \
         ((pproc)->regs.rdx) \
     RVAL_ELSE \
         MAKE_WORD((pproc)->regs.rdx, 0) \
     RVAL_FI \
 /* SYSCALL_ARG3 */
 #define SYSCALL_ARG4(pproc) \
-    RVAL_IF(SCMODE(pproc) == SCMODE_LINUX64) \
+    RVAL_IF(THE_SCMODE(pproc) == SCMODE_LINUX64) \
         ((pproc)->regs.rcx) \
     RVAL_ELSE \
         MAKE_WORD((pproc)->regs.rsi, 0) \
     RVAL_FI \
 /* SYSCALL_ARG4 */
 #define SYSCALL_ARG5(pproc) \
-    RVAL_IF(SCMODE(pproc) == SCMODE_LINUX64) \
+    RVAL_IF(THE_SCMODE(pproc) == SCMODE_LINUX64) \
         ((pproc)->regs.r8) \
     RVAL_ELSE \
         MAKE_WORD((pproc)->regs.rdi, 0) \
     RVAL_FI \
 /* SYSCALL_ARG5 */
 #define SYSCALL_ARG6(pproc) \
-    RVAL_IF(SCMODE(pproc) == SCMODE_LINUX64) \
+    RVAL_IF(THE_SCMODE(pproc) == SCMODE_LINUX64) \
         ((pproc)->regs.r9) \
     RVAL_ELSE \
         MAKE_WORD((pproc)->regs.rbp, 0) \
     RVAL_FI \
 /* SYSCALL_ARG6 */
 #define SYSRET_RETVAL(pproc) \
-    RVAL_IF(SCMODE(pproc) == SCMODE_LINUX64) \
+    RVAL_IF(THE_SCMODE(pproc) == SCMODE_LINUX64) \
         ((pproc)->regs.rax) \
     RVAL_ELSE \
         MAKE_WORD((pproc)->regs.rax, 0) \
     RVAL_FI \
 /* SYSCALL_RETVAL */
+
+#define SET_IN_SYSCALL(pproc) \
+{{{ \
+    (pproc)->tflags.is_in_syscall = true; \
+    (pproc)->tflags.not_wait_execve = ((THE_SYSCALL(pproc) != SC_EXECVE) && \
+                                       (THE_SYSCALL(pproc) != SC32_EXECVE)); \
+}}} /* SET_IN_SYSCALL */
 
 #define CLR_IN_SYSCALL(pproc) \
 {{{ \
@@ -345,26 +332,11 @@ typedef struct
 #define SCMODE_LINUX32          0
 #define SCMODE_MAX              1
 
-#define SCMODE(pproc) \
-    RVAL_IF(((pproc)->regs.xcs == 0x73) || ((pproc)->regs.xcs == 0x23)) \
-        SCMODE_LINUX32 \
-    RVAL_ELSE \
-        SCMODE_MAX \
-    RVAL_FI \
-/* SCMODE */
-
-#define THE_SYSCALL(pproc) \
-    RVAL_IF(((pproc)->tflags.single_step) && !((pproc)->tflags.is_in_syscall)) \
-        MAKE_WORD((pproc)->regs.eax, SCMODE_LINUX32) \
-    RVAL_ELSE \
-        MAKE_WORD((pproc)->regs.orig_eax, SCMODE_LINUX32) \
-    RVAL_FI \
-/* THE_SYSCALL */
-
 #define SC_EXECVE               MAKE_WORD(SYS_execve, SCMODE_LINUX32)
 #define SC_FORK                 MAKE_WORD(SYS_fork, SCMODE_LINUX32)
 #define SC_VFORK                MAKE_WORD(SYS_vfork, SCMODE_LINUX32)
 #define SC_CLONE                MAKE_WORD(SYS_clone, SCMODE_LINUX32)
+#define SC_PTRACE               MAKE_WORD(SYS_ptrace, SCMODE_LINUX32)
 #define SC_WAITPID              MAKE_WORD(SYS_waitpid, SCMODE_LINUX32)
 #define SC_WAIT4                MAKE_WORD(SYS_wait4, SCMODE_LINUX32)
 #define SC_WAITID               MAKE_WORD(SYS_waitid, SCMODE_LINUX32)
@@ -373,8 +345,8 @@ typedef struct
 
 #define IS_SYSCALL(pproc) \
     RVAL_IF((pproc)->tflags.single_step) \
-        ((OPCODE((pproc)->op) == OP_INT80) || \
-         (OPCODE((pproc)->op) == OP_SYSENTER)) \
+        ((OPCODE16((pproc)->op) == OP_INT80) || \
+         (OPCODE16((pproc)->op) == OP_SYSENTER)) \
     RVAL_ELSE \
         (((pproc)->siginfo.si_signo == SIGTRAP) && \
          ((pproc)->siginfo.si_code != SI_USER)) \
@@ -383,8 +355,8 @@ typedef struct
 
 #define IS_SYSRET(pproc) \
     RVAL_IF((pproc)->tflags.single_step) \
-        ((OPCODE((pproc)->op) != OP_INT80) && \
-         (OPCODE((pproc)->op) != OP_SYSENTER) && \
+        ((OPCODE16((pproc)->op) != OP_INT80) && \
+         (OPCODE16((pproc)->op) != OP_SYSENTER) && \
          ((pproc)->tflags.is_in_syscall)) \
     RVAL_ELSE \
         (((pproc)->siginfo.si_signo == SIGTRAP) && \
@@ -400,6 +372,12 @@ typedef struct
 #define SYSCALL_ARG6(pproc)     ((pproc)->regs.ebp)
 #define SYSRET_RETVAL(pproc)    ((pproc)->regs.eax)
 
+#define SET_IN_SYSCALL(pproc) \
+{{{ \
+    (pproc)->tflags.is_in_syscall = true; \
+    (pproc)->tflags.not_wait_execve = (THE_SYSCALL(pproc) != SC_EXECVE); \
+}}} /* SET_IN_SYSCALL */
+
 #define CLR_IN_SYSCALL(pproc) \
 {{{ \
     (pproc)->tflags.is_in_syscall = false; \
@@ -410,8 +388,8 @@ typedef struct
 
 #else /* __linux__ */
 
-#define SCMODE(pproc) 0
-#error "SCMODE is not implemented for this platform"
+#define THE_SCMODE(pproc) 0
+#error "THE_SCMODE is not implemented for this platform"
 #define THE_SYSCALL(pproc) 0
 #error "THE_SYSCALL is not implemented for this platform"
 #define IS_SYSCALL(pproc) (true)
@@ -431,7 +409,7 @@ typedef struct
 /**
  * @brief Bind an empty process stat buffer with a sandbox instance.
  * @param[in] psbox pointer to the sandbox instance
- * @param[out] pproc target process stat buffer
+ * @param[out] pproc pointer to any process stat buffer
  * @return true on success
  */
 bool proc_bind(const void * const psbox, proc_t * const pproc);
@@ -443,7 +421,7 @@ typedef enum
 {
     PROBE_STAT = 0,             /**< probe procfs for process status */
     PROBE_REGS = 1,             /**< probe user registers */
-    PROBE_OP = 2,               /**< probe current instruction */
+    PROBE_OP = 3,               /**< probe current instruction */
     PROBE_SIGINFO = 4,          /**< probe signal info */
 } probe_option_t;
 
@@ -452,14 +430,14 @@ typedef enum
  * @param[in] pid id of targeted process
  * @param[in] opt probe options (can be bitwise OR of PROB_STAT, PROB_REGS,
  *            PROBE_OP, and PROBE_SIGINFO)
- * @param[out] pproc process stat buffer
+ * @param[out] pproc pointer to a binded process stat buffer
  * @return true on sucess, false otherwise
  */
 bool proc_probe(pid_t pid, int opt, proc_t * const pproc);
 
 /**
  * @brief Copy a word from the specified address of targeted process.
- * @param[in] pproc process stat buffer with valid pid and state
+ * @param[in] pproc pointer to a binded process stat buffer
  * @param[out] addr targeted address of the given process
  * @param[out] pword pointer to a buffer at least 4 bytes in length
  * @return true on success, false otherwise
@@ -484,13 +462,14 @@ bool trace_self(void);
 
 /**
  * @brief Hack the traced process to ensure safe tracing.
+ * @param[in,out] pproc pointer to a binded process stat buffer
  * @return true on success
  */
 bool trace_hack(proc_t * const pproc);
 
 /**
  * @brief Schedule next stop for a traced process.
- * @param[in,out] pproc target process stat buffer with valid pid
+ * @param[in,out] pproc pointer to a binded process stat buffer
  * @param[in] type \c TRACE_SYSTEM_CALL or \c TRACE_SINGLE_STEP
  * @return true on success
  */
@@ -498,7 +477,7 @@ bool trace_next(proc_t * const pproc, trace_type_t type);
 
 /**
  * @brief Kill a traced process, prevent any overrun.
- * @param[in,out] pproc target process stat buffer with valid pid
+ * @param[in,out] pproc pointer to a binded process stat buffer
  * @param[in] signal type of signal to use
  * @return true on success
  */
@@ -513,7 +492,7 @@ void * trace_main(void * const psbox);
 
 /**
  * @brief Terminate a traced process and quit trace_main().
- * @param[in] pproc target process stat buffer with valid pid and flags
+ * @param[in] pproc pointer to a binded process stat buffer
  * @return true on success
  */
 bool trace_end(const proc_t * const pproc);

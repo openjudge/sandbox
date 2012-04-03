@@ -2,7 +2,7 @@
 ################################################################################
 # The Sandbox Libraries (Python) Distutil Script                               #
 #                                                                              #
-# Copyright (C) 2004-2009, 2011 LIU Yu, pineapple.liu@gmail.com                #
+# Copyright (C) 2004-2009, 2011, 2012 LIU Yu, pineapple.liu@gmail.com          #
 # All rights reserved.                                                         #
 #                                                                              #
 # Redistribution and use in source and binary forms, with or without           #
@@ -31,14 +31,18 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE   #
 # POSSIBILITY OF SUCH DAMAGE.                                                  #
 ################################################################################
+"""The sandbox libraries (libsandbox & pysandbox) provide API's in C/C++/Python 
+for executing simple (single process) programs in a restricted environment, or
+sandbox. Runtime behaviours of binary executable programs can be captured and 
+blocked according to configurable / programmable policies."""
 
 from distutils.core import setup, Extension
 from glob import glob
-from os.path import join, normpath
+from os.path import join, basename
 
 NAME = 'pysandbox'
 VERSION = "0.3.3"
-RELEASE = "rc3"
+RELEASE = "rc5"
 AUTHOR = "LIU Yu"
 AUTHOR_EMAIL = "pineapple.liu@gmail.com"
 MAINTAINER = AUTHOR
@@ -46,34 +50,32 @@ MAINTAINER_EMAIL = AUTHOR_EMAIL
 URL = "http://sourceforge.net/projects/libsandbox"
 LICENSE = "BSD License"
 DESCRIPTION = "The Sandbox Libraries (Python)"
-LONG_DESCRIPTION = \
-"""The sandbox libraries (libsandbox & pysandbox) provide API's in C/C++/Python 
-for executing simple (single process) programs in a restricted environment, or
-sandbox. Runtime behaviours of binary executable programs can be captured and 
-blocked according to configurable / programmable policies."""
+
+_sandbox = Extension('_sandbox',
+    language='c',
+    define_macros=[('SANDBOX', None), 
+                   ('NDEBUG', None), 
+                   ('AUTHOR', '"%s <%s>"' % \
+                   (AUTHOR, AUTHOR_EMAIL)), 
+                   ('VERSION', '"%s-%s"' % \
+                   (VERSION, RELEASE))],
+    undef_macros=['DEBUG'], 
+    extra_compile_args=['-Wall', '-g0', '-O3'], 
+    include_dirs=[join('packages', 'sandbox'), ], 
+    libraries=['sandbox', 'rt'], 
+    sources=glob(join('packages', 'sandbox', '*.c')))
 
 setup(name=NAME, 
       version=VERSION, 
       description=DESCRIPTION, 
-      long_description=LONG_DESCRIPTION, 
+      long_description=__doc__, 
       author=AUTHOR, 
       author_email=AUTHOR_EMAIL, 
       maintainer=MAINTAINER, 
       maintainer_email=MAINTAINER_EMAIL, 
       license=LICENSE, 
-      url=URL,
-      packages=['sandbox'], 
+      url=URL, 
+      package_dir = {'sandbox': join('packages', 'sandbox'), },
+      packages=['sandbox', ], 
       ext_package='sandbox',
-      ext_modules=[Extension('_sandbox', 
-                             language='c',
-                             define_macros=[('SANDBOX', None), 
-                                            ('NDEBUG', None), 
-                                            ('AUTHOR', '"%s <%s>"' % \
-                                             (AUTHOR, AUTHOR_EMAIL)), 
-                                            ('VERSION', '"%s-%s"' % \
-                                             (VERSION, RELEASE))],
-                             undef_macros=['DEBUG'], 
-                             extra_compile_args=['-Wall', '-g0', '-O3'], 
-                             include_dirs=['sandbox'], 
-                             libraries=['sandbox', 'rt'], 
-                             sources=glob(join('sandbox', '*.c'))), ])
+      ext_modules=[_sandbox, ])

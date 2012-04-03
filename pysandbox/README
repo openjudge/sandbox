@@ -13,20 +13,20 @@ INTRODUCTION
 
 FEATURES
   
-  1. captures system calls with arguments from *sandboxed* binary programs in 
-     runtime, and blocks malicious actions through user-defined policy modules;
-  2. specifies quota of various resources allocated to the *sandboxed* program, 
-     including cpu and wallclock time, memory, and output;
-  3. minimizes privileges of the *sandboxed* program, and isolates its execution
+  1. capture system calls with arguments from *sandboxed* binary programs in 
+     runtime, and block malicious actions through user-defined policy modules;
+  2. specify quota limit of resources allocated to the *sandboxed* program, 
+     including cpu and wallclock time, memory, and disk output;
+  3. minimize privileges of the *sandboxed* program, and isolate its execution
      from critical parts of the operating system;
 
 INSTALLATION
   
-  binary packages (CentOS/RedHat)
+  binary package (CentOS/RedHat)
   
   $ yum install --nogpgcheck pysandbox-<version>.<platform>.rpm
   
-  binary packages (Ubuntu)
+  binary package (Ubuntu)
   
   $ sudo apt-get install rpm
   $ rpm -Uvh --nodeps pysandbox-<version>.<platform>.rpm

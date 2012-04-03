@@ -13,17 +13,17 @@ INTRODUCTION
 
 FEATURES
   
-  1. captures system calls with arguments from *sandboxed* binary programs in 
-     runtime, and blocks malicious actions through user-defined policy modules;
-  2. specifies quota of various resources allocated to the *sandboxed* program, 
-     including cpu and wallclock time, memory, and output;
-  3. minimizes privileges of the *sandboxed* program, and isolates its execution
+  1. capture system calls with arguments from *sandboxed* binary programs in 
+     runtime, and block malicious actions through user-defined policy modules;
+  2. specify quota limit of resources allocated to the *sandboxed* program, 
+     including cpu and wallclock time, memory, and disk output;
+  3. minimize privileges of the *sandboxed* program, and isolate its execution
      from critical parts of the operating system;
 
 INSTALLATION
   
-  Note, there is no need to install 32bit libsandbox package on x86_64 systems. 
-  The 64bit libsandbox can handle both 32bit and 64bit binary programs.
+  Note, there is no need to install 32bit package(s) on x86_64 systems. The 
+  64bit libsandbox can handle both 32bit and 64bit binary programs.
   
   binary package (CentOS/RedHat)
   
@@ -43,10 +43,11 @@ INSTALLATION
 
 SPECIAL NOTICES
   
-  1. libsandbox is designed for, and has been tested on, 2.6/3.0-kernel linux 
-     systems on i686 and x86_64 architectures (support of x86_64 since v0.3.x).
-     Its behaviours on other platforms are undefined even if, though unlikely, 
-     it can pass configuration and (or) compilation;
+  1. libsandbox is designed for, and has been tested on, linux-2.6 (CentOS 6.2,
+     Ubuntu 11.4) and linux-3.0 (Ubuntu 11.10) systems on i686 and x86_64 
+     architectures (x86_64 supported since v0.3.x). The behaviours of libsandbox
+     on other platforms are undefined, even if, though unlikely, it can pass 
+     configuration and (or) compilation;
   2. As of v0.3.3, libsandbox only supports single process ELF programs. If the
      user-provided policy module bypasses system calls that spawn new processes
      (i.e. returning S_ACTION_CONT upon seeing SYS_fork, SYS_vfork, SYS_clone)
@@ -77,15 +78,19 @@ SPECIAL NOTICES
      SIGINT, and SIGQUIT signals, it sends the same signal to the *sandboxed* 
      program. But the former may continue to execute if i) the *sandboxed* 
      program is still running after receiving the signal, and ii) the user-
-     specified policy module explicitly requires libsandbox to continue.
+     specified policy module explicitly requires libsandbox to continue;
   7. When the process, or thread, running libsandbox v0.3.x receives unexpected 
      signals (i.e. not any of SIGALRM, SIGPROF, SIGTERM, SIGINT, or SIGQUIT) that
      are blockable (i.e. other than SIGKILL and SIGSTOP), it terminates the 
      *sandboxed* program with SIGKILL. And since this is not the fault of the 
-     *sandboxed* program, the result will be set to S_RESULT_IE.
+     *sandboxed* program, the result will be set to S_RESULT_IE;
   8. libsandbox (v0.3.x) includes some optional features that can be enabled
      during configuration. Please note that --enable-tsc and --enable-rtsched 
-     are highly experimental, and are not recommended for production systems.
+     are highly experimental, and are not recommended for production systems;
+  9. On some linux-2.6-x86_64 systems, to correctly inspect the system call mode
+     of some 32bit programs, it could be mandatory to build libsandbox (0.3.x) 
+     with --enable-chkvsc option (since 0.3.3-rc4). The binary packages for 
+     x86_64 systems enabled this option by default;
 
 CONTACT
   

@@ -654,9 +654,10 @@ ac_subst_files=''
 ac_user_opts='
 enable_option_checking
 enable_debug
-enable_tsc
-enable_rtsched
 enable_cachesz
+enable_tsc
+enable_chkvsc
+enable_rtsched
 '
       ac_precious_vars='build_alias
 host_alias
@@ -1279,9 +1280,10 @@ Optional Features:
   --disable-FEATURE       do not include FEATURE (same as --enable-FEATURE=no)
   --enable-FEATURE[=ARG]  include FEATURE [ARG=yes]
   --enable-debug          turn on debugging messages
-  --enable-tsc            software tsc (time-stamp counter) statistics
-  --enable-rtsched        use real-time scheduling policy if possible
   --enable-cachesz=SIZE   L2 cache size (in bytes) of targeted platform
+  --enable-tsc            collect software tsc (time-stamp counter) statistics
+  --enable-chkvsc         inspect system call mode from vsyscall opcode
+  --enable-rtsched        use real-time scheduling policy if possible
 
 Some influential environment variables:
   CC          C compiler command
@@ -2127,7 +2129,7 @@ ac_link='$CC -o conftest$ac_exeext $CFLAGS $CPPFLAGS $LDFLAGS conftest.$ac_ext $
 ac_compiler_gnu=$ac_cv_c_compiler_gnu
 
 
-PACKAGE_RELEASE="rc3"
+PACKAGE_RELEASE="rc5"
 
 
 
@@ -2137,8 +2139,9 @@ ac_config_headers="$ac_config_headers src/config.h"
 
 # Checks for optional features.
 with_debug=no
-with_tsc=no
 with_cachesz=no
+with_tsc=no
+with_chkvsc=no
 with_rtsched=no
 
 # Check whether --enable-debug was given.
@@ -2146,19 +2149,24 @@ if test "${enable_debug+set}" = set; then :
   enableval=$enable_debug; with_debug=yes
 fi
 
+# Check whether --enable-cachesz was given.
+if test "${enable_cachesz+set}" = set; then :
+  enableval=$enable_cachesz; with_cachesz=yes
+fi
+
 # Check whether --enable-tsc was given.
 if test "${enable_tsc+set}" = set; then :
   enableval=$enable_tsc; with_tsc=yes
 fi
 
+# Check whether --enable-chkvsc was given.
+if test "${enable_chkvsc+set}" = set; then :
+  enableval=$enable_chkvsc; with_chkvsc=yes
+fi
+
 # Check whether --enable-rtsched was given.
 if test "${enable_rtsched+set}" = set; then :
   enableval=$enable_rtsched; with_rtsched=yes
-fi
-
-# Check whether --enable-cachesz was given.
-if test "${enable_cachesz+set}" = set; then :
-  enableval=$enable_cachesz; with_cachesz=yes
 fi
 
 
@@ -2170,14 +2178,17 @@ if test "x$with_debug" == xyes; then :
 else
   CFLAGS="$CFLAGS -D NDEBUG -U DEBUG"
 fi
+if test "x$with_cachesz" == xyes; then :
+  CFLAGS="$CFLAGS -D CACHE_SIZE=$enable_cachesz"
+fi
 if test "x$with_tsc" == xyes; then :
   CFLAGS="$CFLAGS -D WITH_SOFTWARE_TSC"
 fi
+if test "x$with_chkvsc" == xyes; then :
+  CFLAGS="$CFLAGS -D WITH_VSYSCALL_INSPECT"
+fi
 if test "x$with_rtsched" == xyes; then :
   CFLAGS="$CFLAGS -D WITH_REALTIME_SCHED"
-fi
-if test "x$with_cachesz" == xyes; then :
-  CFLAGS="$CFLAGS -D CACHE_SIZE=$enable_cachesz"
 fi
 
 # Checks for procfs.

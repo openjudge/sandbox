@@ -1,7 +1,7 @@
 ################################################################################
 # The Sandbox Libraries RPM Specification                                      #
 #                                                                              #
-# Copyright (C) 2004-2009, 2011 LIU Yu, pineapple.liu@gmail.com                #
+# Copyright (C) 2004-2009, 2011, 2012 LIU Yu, pineapple.liu@gmail.com          #
 # All rights reserved.                                                         #
 #                                                                              #
 # Redistribution and use in source and binary forms, with or without           #
@@ -32,7 +32,7 @@
 ################################################################################
 %define name libsandbox
 %define version 0.3.3
-%define release rc3
+%define release rc5
 
 Summary: The Sandbox Libraries
 Name: %{name}
@@ -46,7 +46,13 @@ Prefix: %{_prefix}
 Vendor: OpenJudge Alliance, http://openjudge.net
 Packager: LIU Yu <pineapple.liu@gmail.com>
 Url: http://sourceforge.net/projects/libsandbox
-Provides: libsandbox sandbox.h libsandbox.a libsandbox.so
+
+Provides: sandbox.h
+%ifarch x86_64
+Provides: libsandbox.so()(64bit)
+%else
+Provides: libsandbox.so
+%endif
 
 %description
 The sandbox libraries (libsandbox & pysandbox) provide API's in C/C++/Python 
@@ -57,22 +63,22 @@ blocked according to configurable / programmable policies.
 
 %prep
 %setup
-./configure --prefix=%{_prefix}
+./configure --prefix=%{buildroot}%{_prefix} --libdir=%{buildroot}%{_libdir} --includedir=%{buildroot}%{_includedir} --enable-chkvsc
 
 %build
 make
 
 %install
-make PREFIX=$RPM_BUILD_ROOT%{_prefix} install
+make prefix=%{buildroot}%{_prefix} install
 
 %clean
-rm -rf $RPM_BUILD_ROOT%{_prefix}
-rmdir --ignore-fail-on-non-empty $RPM_BUILD_ROOT
+rm -rf %{buildroot}%{_prefix}
+rmdir --ignore-fail-on-non-empty %{buildroot}
 
 %files
 %defattr(-,root,root)
-%{_prefix}/include/sandbox.h
-%{_prefix}/lib/%{name}.so.%{version}
-%{_prefix}/lib/%{name}.so
-%{_prefix}/lib/%{name}.a
+%{_includedir}/sandbox.h
+%{_libdir}/%{name}.so.%{version}
+%{_libdir}/%{name}.so
+%{_libdir}/%{name}.a
 %doc README COPYING CHANGES

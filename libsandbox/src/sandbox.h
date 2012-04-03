@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2004-2009, 2011 LIU Yu, pineapple.liu@gmail.com               *
+ * Copyright (C) 2004-2009, 2011, 2012 LIU Yu, pineapple.liu@gmail.com         *
  * All rights reserved.                                                        *
  *                                                                             *
  * Redistribution and use in source and binary forms, with or without          *
@@ -498,6 +498,11 @@ typedef struct
     (((psbox)->status) == S_STATUS_FIN)
 #endif /* IS_FINISHED */
 
+#ifndef HAS_RESULT
+#define HAS_RESULT(psbox) \
+    (((psbox)->result) != S_RESULT_PD)
+#endif /* HAS_RESULT */
+
 /** 
  * @brief Initialize a \c sandbox_t object.
  * @param[in,out] psbox pointer to the \c sandbox_t object to be initialized
@@ -529,6 +534,15 @@ bool sandbox_check(sandbox_t * psbox);
  * @return pointer to the \c result field of \c psbox, or NULL on failure
  */
 result_t * sandbox_execute(sandbox_t * psbox);
+
+/**
+ * @brief Default policy with a baseline (black) list of system calls.
+ * @param[in] ppolicy pointer to the \c policy_t object of the sandbox, or NULL
+ * @param[in] pevent pointer to the builtin \c event_t object of the sandbox
+ * @param[out] paction pointer to the builtin \c action_t object of the sandbox
+ */
+void sandbox_default_policy(const policy_t * ppolicy, const event_t * pevent, 
+    action_t * paction);
 
 #ifdef __cplusplus
 } /* extern "C" */

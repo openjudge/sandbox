@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2004-2009, 2011 LIU Yu, pineapple.liu@gmail.com               *
+ * Copyright (C) 2004-2009, 2011, 2012 LIU Yu, pineapple.liu@gmail.com         *
  * All rights reserved.                                                        *
  *                                                                             *
  * Redistribution and use in source and binary forms, with or without          *
@@ -89,37 +89,14 @@ typedef enum
     T_ACK = 1, 
     T_END = 2, 
     T_NEXT = 3, 
-    T_KILL = 4, 
-    T_GETREGS = 5, 
-    T_GETDATA = 6, 
-    T_GETSIGINFO = 7, 
-    T_SETREGS = 8,
+    T_GETREGS = 4, 
+    T_GETDATA = 5, 
+    T_GETSIGINFO = 6, 
+    T_SETREGS = 7,
+    T_SETDATA = 8,
 } act_t;
 
-#define NO_ACTION(act) \
-    (((act) == T_NOP) || ((act) == T_ACK)) \
-/* NO_ACTION */
-
-/* Most trace_*() functions directly or indirectly invokes __trace_act(), which
- * directly calls ptrace() in linux. But ptrace() only works when called from
- * the *main* thread initially started tracing the prisoner process (and thus
- * became the direct parent of the latter). The workaround is when trace_*() is
- * called from another thread, they resort to asynchronous __trace_req() to
- * place the desired action (and input) in a set of global variables, and wait
- * for trace_main() to perform the desired actions by calling __trace_act(). The
- * trace_main() function is guaranteed to be running in the *main* thread. */
-
-typedef long (* trace_proxy_t)(act_t, long * const, proc_t * const);
-static long __trace_req(act_t, long * const, proc_t * const);
-static long __trace_act(act_t, long * const, proc_t * const);
-
-#define TRACE_PROXY(pproc) \
-    RVAL_IF((pproc)->tflags.trace_id == pthread_self()) \
-        (__trace_act) \
-    RVAL_ELSE \
-        (__trace_req) \
-    RVAL_FI \
-/* TRACE_PROXY */
+static long __trace(act_t, proc_t * const, void * const, long * const);
 
 bool
 proc_bind(const void * const dummy, proc_t * const pproc)
@@ -131,8 +108,10 @@ proc_bind(const void * const dummy, proc_t * const pproc)
     {
         FUNC_RET("%d", false);
     }
+    sandbox_t * psbox = (sandbox_t *)dummy;
     
-    pproc->tflags.trace_id = ((sandbox_t *)dummy)->ctrl.tid;
+    pproc->pid = psbox->ctrl.pid;
+    pproc->tflags.trace_id = psbox->ctrl.tid;
     
     FUNC_RET("%d", true);
 }
@@ -297,17 +276,15 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
     DBG("proc.cmajflt                %010lu", pproc->cmajflt);
     DBG("proc.vsize                  %010lu", pproc->vsize);
     DBG("proc.rss                    % 10ld", pproc->rss);
-
+    
 #else
 #warning "proc_probe() requires procfs"
 #endif /* HAVE_PROCFS */
-
-    trace_proxy_t __trace = TRACE_PROXY(pproc);
     
     /* Inspect process registers */
     if (opt & PROBE_REGS)
     {
-        if (__trace(T_GETREGS, NULL, pproc) != 0)
+        if (__trace(T_GETREGS, pproc, NULL, NULL) != 0)
         {
             FUNC_RET("%d", false);
         }
@@ -363,19 +340,18 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
     /* Inspect current instruction */
     if (opt & PROBE_OP)
     {
-
 #ifdef __x86_64__
-        pproc->op = pproc->regs.rip;
+        unsigned char * addr = (unsigned char *)pproc->regs.rip;
 #else /* __i386__ */
-        pproc->op = pproc->regs.eip;
+        unsigned char * addr = (unsigned char *)pproc->regs.eip;
 #endif /* __x86_64__ */
 
         if (!pproc->tflags.single_step)
         {
-            pproc->op -= 2; // shift back 16bit in syscall tracing mode
+            addr -= 2; /* backoff 2 bytes in system call tracing mode */
         }
         
-        if (__trace(T_GETDATA, (long *)&pproc->op, pproc) != 0)
+        if (__trace(T_GETDATA, pproc, (void *)addr, (long *)&pproc->op) != 0)
         {
             FUNC_RET("%d", false);
         }
@@ -386,7 +362,7 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
     /* Inspect signal information */
     if (opt & PROBE_SIGINFO)
     {
-        if (__trace(T_GETSIGINFO, NULL, pproc) != 0)
+        if (__trace(T_GETSIGINFO, pproc, NULL, NULL) != 0)
         {
             FUNC_RET("%d", false);
         }
@@ -397,6 +373,120 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
     }
     
     FUNC_RET("%d", true);
+}
+
+int
+syscall_mode(proc_t * const pproc)
+{
+    FUNC_BEGIN("%p", pproc);
+    assert(pproc);
+    
+    if (pproc == NULL)
+    {
+        FUNC_RET("%d", SCMODE_MAX);
+    }
+
+#ifdef __x86_64__
+    /* INT80 and SYSENTER always maps in 32bit syscall table regardless of the 
+     * value of CS c.f. http://scary.beasts.org/security/CESA-2009-001.html */
+    #define SYSCALL_MODE(pproc) \
+        RVAL_IF((OPCODE16((pproc)->op) == OP_INT80) || \
+                (OPCODE16((pproc)->op) == OP_SYSENTER)) \
+            SCMODE_LINUX32 \
+        RVAL_ELSE \
+            RVAL_IF(OPCODE16((pproc)->op) == OP_SYSCALL) \
+                RVAL_IF(((pproc)->regs.cs) == 0x23) \
+                    SCMODE_LINUX32 \
+                RVAL_ELSE \
+                    RVAL_IF(((pproc)->regs.cs) == 0x33) \
+                        SCMODE_LINUX64 \
+                    RVAL_ELSE \
+                        SCMODE_MAX \
+                    RVAL_FI \
+                RVAL_FI \
+            RVAL_ELSE \
+                SCMODE_MAX \
+            RVAL_FI \
+        RVAL_FI \
+    /* SYSCALL_MODE */
+#else /* __i386__ */
+    #define SYSCALL_MODE(pproc) \
+        RVAL_IF((((pproc)->regs.xcs) == 0x23) || \
+                (((pproc)->regs.xcs) == 0x73)) \
+            SCMODE_LINUX32 \
+        RVAL_ELSE \
+            SCMODE_MAX \
+        RVAL_FI \
+    /* SYSCALL_MODE */
+#endif /* __x86_64__ */
+
+    /* In single step tracing mode, we inspect system call mode from i) the 
+     * instruction addressed by eip / rip and ii) the value of xcs / cs.  */
+    if (pproc->tflags.single_step)
+    {
+        FUNC_RET("%d", SYSCALL_MODE(pproc));
+    }
+    
+#ifdef WITH_VSYSCALL_INSPECT
+#warning "vsyscall opcode inspection is an experimental feature"
+#ifdef __x86_64__
+    
+    /* In system call tracing mode, the process may somehow stop at the 
+     * entrance of __kernel_vsyscall (i.e. JMP <__kernel_vsyscall+3>), 
+     * rather than at the actual system call instruction (e.g. SYSENTER).
+     * I observed this issue when running static ELF-i386 programs on 
+     * kernel-2.6.32-220.7.1.el6.x86_64. Perhaps a bug in the way the Linux 
+     * kernel handles ptrace(). As a workaround, we can follow the JMP for 
+     * a few steps to locate the actual instruction. In its current status,
+     * we have only implemented JMP REL (i.e. EB and E9) inspection. Other 
+     * types of JMP / CALL instructions are treated as illegal scmode. */
+    
+    unsigned char * addr = (unsigned char *)pproc->regs.rip;
+    
+    switch (OPCODE16(pproc->op) & 0xffUL)
+    {
+    case 0xeb: /* jmp rel short */
+        addr += (char)((pproc->op & 0xff00UL) >> 8);
+        break;
+    case 0xe9: /* jmp rel */
+        addr += (int)((pproc->op & 0xffffffff00UL) >> 8);
+        break;
+    case 0xea: /* jmp far */
+    case 0xff: /* call */
+    default:
+        FUNC_RET("%d", SYSCALL_MODE(pproc));
+        break;
+    }
+    
+    unsigned long code;
+    if (__trace(T_GETDATA, pproc, addr, (long *)&code) != 0)
+    {
+        FUNC_RET("%d", SCMODE_MAX);
+    }
+    
+    size_t offset;
+    for (offset = 0; offset < sizeof(long) - 1; offset++)
+    {
+        if ((OPCODE16(code) == OP_INT80) || \
+            (OPCODE16(code) == OP_SYSENTER) || \
+            (OPCODE16(code) == OP_SYSCALL))
+        {
+            addr += offset;
+            if (__trace(T_GETDATA, pproc, addr, (long *)&pproc->op) != 0)
+            {
+                FUNC_RET("%d", SCMODE_MAX);
+            }
+            DBG("vsyscall_addr       0x%016lx", addr);
+            DBG("vsyscall_code       0x%016lx", pproc->op);
+            break;
+        }
+        code = (code >> 8);
+    }
+    
+#endif /* __x86_64__ */
+#endif /* WITH_VSYSCALL_INSPECT */
+    
+    FUNC_RET("%d", SYSCALL_MODE(pproc));
 }
 
 bool
@@ -411,15 +501,12 @@ proc_dump(const proc_t * const pproc, const void * const addr,
         FUNC_RET("%d", false);
     }
     
-    trace_proxy_t __trace = TRACE_PROXY(pproc);
-    
-    long data = (long)addr;
-    if (__trace(T_GETDATA, &data, (proc_t *)pproc) != 0)
+    if (__trace(T_GETDATA, (proc_t *)pproc, (void *)addr, pword) != 0)
     {
         FUNC_RET("%d", false);
-    }
+    }    
     
-    *pword = data;
+    DBG("data.%p     0x%016lx", addr, *pword);
     
 #ifdef DELETED
 #ifdef HAVE_PROCFS
@@ -451,9 +538,7 @@ proc_dump(const proc_t * const pproc, const void * const addr,
 #warning "proc_dump() requires procfs"
 #endif /* HAVE_PROCFS */
 #endif /* DELETED */
-
-    DBG("data.%p     0x%016lx", addr, *pword);
-
+    
     FUNC_RET("%d", true);
 }
 
@@ -478,11 +563,13 @@ trace_hack(proc_t * const pproc)
     FUNC_BEGIN("%p", pproc);
     assert(pproc);
     
-    trace_proxy_t __trace = TRACE_PROXY(pproc);
-    
-    bool res = (__trace(T_SETREGS, NULL, pproc) == 0);
+#ifdef DELETED
+    bool res = (__trace(T_SETREGS, pproc, NULL, NULL) == 0);
     
     FUNC_RET("%d", res);
+#else    
+    FUNC_RET("%d", true);
+#endif /* DELETED */
 }
 
 bool
@@ -491,10 +578,8 @@ trace_next(proc_t * const pproc, trace_type_t type)
     FUNC_BEGIN("%p,%d", pproc, type);
     assert(pproc);
     
-    trace_proxy_t __trace = TRACE_PROXY(pproc);
-    
-    long data = (long)type;
-    bool res = (__trace(T_NEXT, &data, pproc) == 0);
+    long opt = (long)type;
+    bool res = (__trace(T_NEXT, pproc, NULL, &opt) == 0);
     
     FUNC_RET("%d", res);
 }
@@ -505,10 +590,50 @@ trace_kill(proc_t * const pproc, int signo)
     FUNC_BEGIN("%p,%d", pproc, signo);
     assert(pproc);
     
-    trace_proxy_t __trace = TRACE_PROXY(pproc);
+    /* We only do opcode rewrite when signo is non-blockable, i.e. SIGKILL or 
+     * SIGSTOP. This is because the prisoner process may continue to execute
+     * after handling (or ignoring) a blockable signal. It is only reasonable to
+     * rewrite the opcode to a sequence of nop's, if the prisoner process is 
+     * guaranteed to terminate or get killed immediately. */
     
-    long data = (long)(signo);
-    bool res = (__trace(T_KILL, &data, (proc_t *)pproc) == 0);
+    if ((signo == SIGKILL) || (signo == SIGSTOP))
+    {
+        if (proc_probe(pproc->pid, PROBE_REGS, pproc))
+        {
+#ifdef __x86_64__
+            unsigned char * addr = (unsigned char *)pproc->regs.rip;
+            unsigned long nop = 0x9090909090909090UL;
+#else /* __i386__ */
+            unsigned char * addr = (unsigned char *)pproc->regs.eip;
+            unsigned long nop = 0x90909090UL;
+#endif /* __x86_64__ */        
+            __trace(T_SETDATA, pproc, (void *)addr, (long *)&nop);
+        }
+    }
+    
+    bool res = (kill(-(pproc->pid), signo) == 0);
+    
+#ifdef DELETED   
+    if (pproc->tflags.is_in_syscall)
+    {
+        long scno = SYS_pause;
+#ifdef __x86_64__
+        if (pproc->syscall_mode == SCMODE_LINUX32)
+        {
+            scno = SYS32_pause;
+        }
+#endif /* __x86_64__ */
+        if (pproc->tflags.single_step)
+        {
+            pproc->regs.NAX = scno;
+        }
+        else
+        {
+            pproc->regs.ORIG_NAX = scno;
+        }
+        __trace(T_SETREGS, (proc_t *)pproc, NULL, NULL);
+    }
+#endif /* DELETED */
     
     FUNC_RET("%d", res);
 }
@@ -519,19 +644,30 @@ trace_end(const proc_t * const pproc)
     FUNC_BEGIN("%p", pproc);
     assert(pproc);
     
-    trace_proxy_t __trace = TRACE_PROXY(pproc);
-    bool res = (__trace(T_END, NULL, (proc_t *)pproc) == 0);
+    bool res = (__trace(T_END, (proc_t *)pproc, NULL, NULL) == 0);
     
     FUNC_RET("%d", res);
 }
 
+/* Most trace_*() functions directly or indirectly invokes ptrace() in linux. 
+ * But ptrace() only works when called from the *main* thread initially started 
+ * tracing the prisoner process (and thus being the parent of the latter). The 
+ * workaround is to make __trace() asynchronous. It places the desired action 
+ * (and input) into a set of global variables, and waits for trace_main() to 
+ * perform the desired actions by calling __trace_impl(), which then calls 
+ * ptrace(). trace_main() is guaranteed to be running in the *main* thread. */
+
+#define NO_ACTION(act) \
+    (((act) == T_NOP) || ((act) == T_ACK)) \
+/* NO_ACTION */
+
 static long
-__trace_act(act_t action, long * const pdata, proc_t * const pproc)
+__trace_impl(act_t action, proc_t * const pproc, void * const addr, 
+    long * const pdata)
 {
-    FUNC_BEGIN("%d,%p,%p", action, pdata, pproc);
+    FUNC_BEGIN("%d,%p,%p,%p", action, pproc, addr, pdata);
     assert(!NO_ACTION(action));
     assert(pproc);
-    assert(pproc->tflags.trace_id == pthread_self());
     
     if (action == T_END)
     {
@@ -561,21 +697,6 @@ __trace_act(act_t action, long * const pdata, proc_t * const pproc)
             res = ptrace(PTRACE_SYSCALL, pid, NULL, NULL);
         }
         break;
-    case T_KILL:
-        assert(pdata);
-        if (pproc->tflags.is_in_syscall)
-        {
-            if (pproc->tflags.single_step)
-            {
-                ptrace(PTRACE_POKEUSER, pid, NAX * sizeof(long), SYS_pause);
-            }
-            else
-            {
-                ptrace(PTRACE_POKEUSER, pid, ORIG_NAX * sizeof(long), SYS_pause);
-            }
-        }
-        res = kill(-pid, (int)(*pdata));
-        break;
     case T_GETREGS:
         res = ptrace(PTRACE_GETREGS, pid, NULL, (void *)&pproc->regs);
         break;
@@ -586,16 +707,25 @@ __trace_act(act_t action, long * const pdata, proc_t * const pproc)
         res = ptrace(PTRACE_GETSIGINFO, pid, NULL, (void *)&pproc->siginfo);
         break;
     case T_GETDATA:
-        assert(pdata);
-        *pdata = ptrace(PTRACE_PEEKDATA, pid, (void *)(*pdata), NULL);
-        res = errno;
+        assert(addr);
+        {
+            long temp = ptrace(PTRACE_PEEKDATA, pid, addr, NULL);
+            res = errno;
+            *pdata = (res != 0)?(*pdata):(temp);
+        }
+        break;
+    case T_SETDATA:
+        assert(addr);
+        {
+            res = ptrace(PTRACE_POKEDATA, pid, addr, *pdata);
+        }
         break;
     default:
         res = 0;
         break;
     }
 #else
-#warning "__trace_act() is not implemented for this platform"
+#warning "__trace_impl() is not implemented for this platform"
 #endif /* HAVE_PTRACE */
     
     FUNC_RET("%ld", res);
@@ -605,20 +735,28 @@ typedef struct
 {
     act_t action;
     proc_t * pproc;
+    void * addr;
     long data;
     long result;
 } trace_info_t;
 
 static pthread_mutex_t trace_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t trace_notice = PTHREAD_COND_INITIALIZER;
-static trace_info_t trace_info = {T_NOP, NULL, 0, 0};
+static trace_info_t trace_info = {T_NOP, NULL, NULL, 0, 0};
 
 static long
-__trace_req(act_t action, long * const pdata, proc_t * const pproc)
+__trace(act_t action, proc_t * const pproc, void * const addr, 
+    long * const pdata)
 {
-    FUNC_BEGIN("%d,%p,%p", action, pdata, pproc);
+    FUNC_BEGIN("%d,%p,%p,%p", action, pproc, addr, pdata);
     assert(!NO_ACTION(action));
     assert(pproc);
+    
+    /* Shortcut to synchronous trace */
+    if ((pproc->tflags.trace_id == pthread_self()) && (action != T_END))
+    {
+        FUNC_RET("%ld", __trace_impl(action, pproc, addr, pdata));
+    }
     
     long res = 0;
     
@@ -636,6 +774,7 @@ __trace_req(act_t action, long * const pdata, proc_t * const pproc)
     /* Propose the request */
     trace_info.action = action;
     trace_info.pproc = pproc;
+    trace_info.addr = addr;
     trace_info.data = ((pdata != NULL)?(*pdata):(0));
     trace_info.result = 0;
     
@@ -658,6 +797,7 @@ __trace_req(act_t action, long * const pdata, proc_t * const pproc)
     /* Release slot */
     trace_info.action = T_NOP;
     trace_info.pproc = NULL;
+    trace_info.addr = NULL;
     trace_info.data = 0;
     trace_info.result = 0;
     pthread_cond_broadcast(&trace_notice);
@@ -679,7 +819,7 @@ trace_main(void * const dummy)
     
     if (psbox == NULL)
     {
-        FUNC_RET("%p", NULL);
+        FUNC_RET("%p", (void *)NULL);
     }
     
     /* Detect and perform actions while the sandbox is running */
@@ -712,8 +852,8 @@ trace_main(void * const dummy)
             end = true;
         }
         
-        trace_info.result = __trace_act(trace_info.action, &trace_info.data,
-            trace_info.pproc);
+        trace_info.result = __trace_impl(trace_info.action, trace_info.pproc,
+            trace_info.addr, &trace_info.data);
         
         /* Notify the trace_*() to collect results */
         trace_info.action = T_ACK;

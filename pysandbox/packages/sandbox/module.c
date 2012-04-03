@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2004-2009, 2011 LIU Yu, pineapple.liu@gmail.com               *
+ * Copyright (C) 2004-2009, 2011, 2012 LIU Yu, pineapple.liu@gmail.com         *
  * All rights reserved.                                                        *
  *                                                                             *
  * Redistribution and use in source and binary forms, with or without          *
@@ -441,7 +441,9 @@ SandboxPolicy_free(SandboxPolicy * self)
     PROC_END();
 }
 
+#ifdef DELETED
 static void SandboxPolicy_default_policy(const event_t *, action_t *);
+#endif /* DELETED */
 
 static PyObject *
 SandboxPolicy_call(SandboxPolicy * self, PyObject * args, PyObject * keys)
@@ -456,18 +458,29 @@ SandboxPolicy_call(SandboxPolicy * self, PyObject * args, PyObject * keys)
     {
         FUNC_RET("%p", NULL);
     }
-
+    
     if (!SandboxEvent_Check(pEvent) || !SandboxAction_Check(pAction))
     {
         PyErr_SetString(PyExc_AssertionError, MSG_POLICY_CALL_FAILED);
         FUNC_RET("%p", NULL);
     }
     
+    /* Since 0.3.3-rc4, the core library exports a baseline policy function
+     * sandbox_default_policy() for preliminary (minimal black list) sandboxing.
+     * The calling programs of the core library, i.e. pysandbox, no longer need 
+     * to include local baseline policies. They should, of course, override the 
+     * baseline policy if more sophisticated sandboxing rules are desired. */
+    
+#ifdef DELETED
     SandboxPolicy_default_policy(
+#endif /* DELETED */
+    
+    sandbox_default_policy(
+        NULL,
         SandboxEvent_AS_EVENT(pEvent), 
         SandboxAction_AS_ACTION(pAction)
     );
-
+    
     FUNC_RET("%p", pAction);
 }
 
@@ -492,6 +505,7 @@ SandboxPolicy_New(void)
     FUNC_RET("%p", o);
 }
 
+#ifdef DELETED
 static void 
 SandboxPolicy_default_policy(const event_t * pevent, action_t * paction)
 {
@@ -541,6 +555,7 @@ SandboxPolicy_default_policy(const event_t * pevent, action_t * paction)
     }
     PROC_END();
 }
+#endif /* DELETED */
 
 static PyObject * Sandbox_run(Sandbox *);
 static PyObject * Sandbox_probe(Sandbox *);

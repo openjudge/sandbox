@@ -1,7 +1,7 @@
 ################################################################################
 # Sandbox Library Source File (symbols.c) Generator Script                     #
 #                                                                              #
-# Copyright (C) 2004-2009, 2011 LIU Yu, pineapple.liu@gmail.com                #
+# Copyright (C) 2004-2009, 2011, 2012 LIU Yu, pineapple.liu@gmail.com          #
 # All rights reserved.                                                         #
 #                                                                              #
 # Redistribution and use in source and binary forms, with or without           #
@@ -33,7 +33,7 @@
 
 BEGIN {
     print "/*******************************************************************************"
-    print " * Copyright (C) 2004-2009, 2011 LIU Yu, pineapple.liu@gmail.com               *"
+    print " * Copyright (C) 2004-2009, 2011, 2012 LIU Yu, pineapple.liu@gmail.com         *"
     print " * All rights reserved.                                                        *"
     print " *                                                                             *"
     print " * Redistribution and use in source and binary forms, with or without          *"
@@ -132,7 +132,7 @@ END {
             printf("        \"N/A\", /* %d */\n", n);
     }
     print "    };"
-    print "    assert(event < sizeof(table) / sizeof(char *));"
+    print "    assert((unsigned int)event < sizeof(table) / sizeof(char *));"
     print "    return table[event];"
     print "}"
     print ""
@@ -150,7 +150,7 @@ END {
        	    printf("        \"N/A\", /* %d */\n", n);
     }
     print "    };"
-    print "    assert(action < sizeof(table) / sizeof(char *));"
+    print "    assert((unsigned int)action < sizeof(table) / sizeof(char *));"
     print "    return table[action];"
     print "}"
     print ""
@@ -168,7 +168,7 @@ END {
        	    printf("        \"N/A\", /* %d */\n", n);
     }
     print "    };"
-    print "    assert(status < sizeof(table) / sizeof(char *));"
+    print "    assert((unsigned int)status < sizeof(table) / sizeof(char *));"
     print "    return table[status];"
     print "}"
     print ""
@@ -186,7 +186,7 @@ END {
             printf("        \"N/A\", /* %d */\n", n);
     }
     print "    };"
-    print "    assert(result < sizeof(table) / sizeof(char *));"
+    print "    assert((unsigned int)result < sizeof(table) / sizeof(char *));"
     print "    return table[result];"
     print "}"
     print ""
@@ -204,7 +204,7 @@ END {
             printf("        \"N/A\", /* %d */\n", n);
     }
     print "    };"
-    print "    assert(action < sizeof(table) / sizeof(char *));"
+    print "    assert((unsigned int)action < sizeof(table) / sizeof(char *));"
     print "    return table[action];"
     print "}"
     print ""

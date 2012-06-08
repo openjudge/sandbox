@@ -30,27 +30,55 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE   #
 # POSSIBILITY OF SUCH DAMAGE.                                                  #
 ################################################################################
-"""Sandbox Libraries (Python API)
+"""Sandbox Libraries (Python)
 
-The sandbox libraries (libsandbox & pysandbox) provide API's in C/C++/Python 
-for executing simple (single process) programs in a restricted environment or 
-sandbox. Runtime behaviours of binary executable programs can be captured and 
-blocked according to configurable / programmable policies.
+The sandbox libraries (libsandbox & pysandbox) provide API's in C/C++ 
+and Python for executing and profiling simple (single process) programs 
+in a restricted environment, or sandbox. Runtime behaviours of binary 
+executable programs can be captured and blocked according to configurable /
+programmable policies.
 
-The sandbox libraries are distributed under the terms of the New BSD license, 
+The sandbox libraries are distributed under the terms of the New BSD license
 please refer to the plain text file named COPYING in individual packages.
 
 Project Homepage: http://openjudge.net/~liuyu/Project/LibSandbox
+
+GETTING STARTED
+
+  $ python
+  >>> from sandbox import *
+  >>> s = Sandbox(["/foo/bar.exe", "arg1", "arg2"])
+  >>> s.run()
+  ...
+  >>> s.probe()
+  ...
 """
 
-import _sandbox
-from _sandbox import SandboxEvent, SandboxAction, SandboxPolicy
-from _sandbox import __version__, __author__
+from . import _sandbox
+from ._sandbox import SandboxEvent, SandboxAction, SandboxPolicy
+from ._sandbox import __version__, __author__
 
 class Sandbox(_sandbox.Sandbox):
+    def run(self):
+        """Execute the sandboxed program. This method blocks the calling 
+program until the sandboxed program is finished (or terminated).
+"""
+        return _sandbox.Sandbox.run(self)
+    def dump(self, typeid, address):
+        """Copy the memory block starting from the specificed address of 
+the sandboxed program's memory space, and build an object from the 
+obtained data. Possble typeid's and corresponding return types
+are listed as follows,
+
+  - T_CHAR, T_BYTE, T_UBYTE: long
+  - T_SHORT, T_USHORT, T_INT, T_UINT, T_LONG, T_ULONG: long
+  - T_FLOAT, T_DOUBLE: float
+  - T_STRING: str
+"""
+        return _sandbox.Sandbox.dump(self, typeid, address)
     def probe(self, compatible=True):
-        """Return a dict of sandbox runtime information. The result by default 
-contains the following entries,   
+        """Return a dictionary containing runtime statistics of the sandboxed 
+program. The result contains the following entries by default, 
   
   - cpu_info (4-tuple): 
       0 (%d): cpu clock time usage (msec)
@@ -73,8 +101,8 @@ contains the following entries,
   - elapsed (%d): elapsed wallclock time since started (msec)
   - exitcode (%d): exit status of the sandboxed program
 
-When the optional argument *compatible* is True, the result additionally 
-contains the following entries, 
+When the optional argument *compatible* is True, the result 
+additionally contains the following entries, 
   
   - cpu (%d): cpu time usage (msec)
   - cpu.usr (%d): cpu time usage in user mode (msec)

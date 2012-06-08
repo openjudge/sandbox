@@ -1,5 +1,5 @@
 ################################################################################
-# Sandbox Library Source File (symbols.c) Generator Script                     #
+# Sandbox Library Source File (internal.c) Generator Script                    #
 #                                                                              #
 # Copyright (C) 2004-2009, 2011, 2012 LIU Yu, pineapple.liu@gmail.com          #
 # All rights reserved.                                                         #
@@ -63,18 +63,15 @@ BEGIN {
     print " * POSSIBILITY OF SUCH DAMAGE.                                                 *"
     print " ******************************************************************************/"
     print "/*"
-    print " * This file was automatically generated with \"symbols.awk\""
+    print " * This file was automatically generated with \"internal.awk\""
     print " */"
     print ""
-    print "#include \"symbols.h\""
-    print "#include <assert.h>"
+    print "#include \"internal.h\""
     print ""
     print "#ifdef __cplusplus"
     print "extern \"C\""
     print "{"
     print "#endif"
-    print ""
-    print "#ifndef NDEBUG"
     print ""
     
     nevent = 0
@@ -85,8 +82,8 @@ BEGIN {
     istatus = 0;
     nresult = 0;
     iresult = 0;
-    ncommand = 0;
-    icommand = 0;
+    noption = 0;
+    ioption = 0;
 }
 /^[[:space:]]*S_EVENT_[[:alnum:]]+[[:space:]]+=[[:space:]]+[[:digit:]+][.]*/ {
     ievent = sprintf("%d", $3);
@@ -112,11 +109,11 @@ BEGIN {
     	nresult = iresult + 1;
     resultlist[iresult] = sprintf("%s", substr($1, 10, 16));
 }
-/^[[:space:]]*T_[[:alnum:]]+[[:space:]]+=[[:space:]]+[[:digit:]+][.]*/ {
-    icommand = sprintf("%d", $3);
-    if (ncommand <= icommand)
-        ncommand = icommand + 1;
-    commandlist[icommand] = sprintf("%s", substr($1, 3, 16)); 
+/^[[:space:]]*T_OPTION_[[:alnum:]]+[[:space:]]+=[[:space:]]+[[:digit:]+][.]*/ {
+    ioption = sprintf("%d", $3);
+    if (noption <= ioption)
+        noption = ioption + 1;
+    optionlist[ioption] = sprintf("%s", substr($1, 10, 16)); 
 }
 END {
     print "const char *"
@@ -192,25 +189,23 @@ END {
     print ""
 
     print "const char *"
-    print "trace_act_name(int action)"
+    print "t_option_name(int option)"
     print "{"
     print "    static const char * table[] = "
     print "    {"
-    for (n = 0; n < ncommand; n++)
+    for (n = 0; n < noption; n++)
     {
-        if (commandlist[n] != "")
-            printf("        \"%s\", /* %d */\n", commandlist[n], n);
+        if (optionlist[n] != "")
+            printf("        \"%s\", /* %d */\n", optionlist[n], n);
         else
             printf("        \"N/A\", /* %d */\n", n);
     }
     print "    };"
-    print "    assert((unsigned int)action < sizeof(table) / sizeof(char *));"
-    print "    return table[action];"
+    print "    assert((unsigned int)option < sizeof(table) / sizeof(char *));"
+    print "    return table[option];"
     print "}"
     print ""
 
-    print "#endif /* NDEBUG */"
-    print ""
     print "#ifdef __cplusplus"
     print "} /* extern \"C\" */"
     print "#endif"

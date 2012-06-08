@@ -31,18 +31,19 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE   #
 # POSSIBILITY OF SUCH DAMAGE.                                                  #
 ################################################################################
-"""The sandbox libraries (libsandbox & pysandbox) provide API's in C/C++/Python 
-for executing simple (single process) programs in a restricted environment, or
-sandbox. Runtime behaviours of binary executable programs can be captured and 
-blocked according to configurable / programmable policies."""
+"""The sandbox libraries (libsandbox & pysandbox) provide API's in C/C++ and
+Python for executing and profiling simple (single process) programs in a 
+restricted environment, or sandbox. Runtime behaviours of binary executable 
+programs can be captured and blocked according to configurable/programmable   
+policies."""
 
 from distutils.core import setup, Extension
 from glob import glob
 from os.path import join, basename
 
 NAME = 'pysandbox'
-VERSION = "0.3.3"
-RELEASE = "rc5"
+VERSION = "0.3.4"
+RELEASE = "1"
 AUTHOR = "LIU Yu"
 AUTHOR_EMAIL = "pineapple.liu@gmail.com"
 MAINTAINER = AUTHOR
@@ -60,7 +61,7 @@ _sandbox = Extension('_sandbox',
                    ('VERSION', '"%s-%s"' % \
                    (VERSION, RELEASE))],
     undef_macros=['DEBUG'], 
-    extra_compile_args=['-Wall', '-g0', '-O3'], 
+    extra_compile_args=['-Wall', '-Wno-write-strings', '-g0', '-O3'], 
     include_dirs=[join('packages', 'sandbox'), ], 
     libraries=['sandbox', 'rt'], 
     sources=glob(join('packages', 'sandbox', '*.c')))

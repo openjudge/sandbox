@@ -36,33 +36,20 @@
 #define __OJS_PLATFORM_H__
 
 #include <pthread.h>            /* pthread_t */
+#include <stdbool.h>            /* false, true */
 #include <signal.h>             /* siginfo_t, SIGTRAP */
-#include <time.h>               /* struct timespec */
 #include <sys/types.h>          /* pid_t */
 #ifdef __linux__
 #include <sys/reg.h>            /* EAX, EBX, ... */
 #include <sys/syscall.h>        /* SYS_execve, ... */
 #include <sys/user.h>           /* struct user_regs_struct */
 #endif /* __linux__ */
+#include <time.h>               /* struct timespec */
 
 #ifdef __cplusplus
 extern "C"
 {
 #endif
-
-#ifndef __cplusplus
-#ifndef HAVE_BOOL
-#define HAVE_BOOL
-/** 
- * @brief Emulation of the C++ bool type. 
- */
-typedef enum 
-{
-    false,                      /*!< false */
-    true                        /*!< true */
-} bool;
-#endif /* HAVE_BOOL */
-#endif /* __cplusplus */
 
 /* architecture detection */
 #undef SUPPORTED_ARCH
@@ -155,28 +142,6 @@ typedef struct
     unsigned long op;           /**< current instruction */
 } proc_t;
 
-/* Macros for manipulating struct timespec */
-
-#define ms2ns(x) (1000000 * (x))
-#define ts2ms(x) ((((x).tv_sec) * 1000) + (((x).tv_nsec) / 1000000))
-#define TS_SUBTRACT(x,y) \
-{{{ \
-    if ((x).tv_nsec < (y).tv_nsec) \
-    { \
-        long sec = 1 + ((y).tv_nsec - (x).tv_nsec) / ms2ns(1000); \
-        (x).tv_sec -= sec; \
-        (x).tv_nsec += ms2ns(1000 * sec); \
-    } \
-    if ((x).tv_nsec - (y).tv_nsec >= ms2ns(1000)) \
-    { \
-        long sec = ((y).tv_nsec - (x).tv_nsec) / ms2ns(1000); \
-        (x).tv_nsec -= ms2ns(1000 * sec); \
-        (x).tv_sec += sec; \
-    } \
-    (x).tv_sec -= (y).tv_sec; \
-    (x).tv_nsec -= (y).tv_nsec; \
-}}} /* TS_SUBTRACT */
-
 /* Macros for composing conditional rvalue */
 #define RVAL_IF(x)              ((x)?(
 #define RVAL_ELSE               ):(
@@ -188,6 +153,12 @@ typedef struct
 
 #ifdef __linux__
 
+/**
+ * @brief Inspect current system call type of a process.
+ * @param[in] pproc pointer to a binded process stat buffer
+ * @return 0 for native type, 1, 2, ... for valid alternative types, and 
+ * \c SCMODE_MAX for unknown type
+ */
 int syscall_mode(proc_t * const);
 
 #define THE_SCMODE(pproc) \
@@ -427,7 +398,7 @@ typedef enum
 
 /**
  * @brief Probe runtime information of specified process.
- * @param[in] pid id of targeted process
+ * @param[in] pid id of the prisoner process
  * @param[in] opt probe options (can be bitwise OR of PROB_STAT, PROB_REGS,
  *            PROBE_OP, and PROBE_SIGINFO)
  * @param[out] pproc pointer to a binded process stat buffer
@@ -436,9 +407,9 @@ typedef enum
 bool proc_probe(pid_t pid, int opt, proc_t * const pproc);
 
 /**
- * @brief Copy a word from the specified address of targeted process.
+ * @brief Copy a word from the specified address of the prisoner process.
  * @param[in] pproc pointer to a binded process stat buffer
- * @param[out] addr targeted address of the given process
+ * @param[out] addr address in the memory space of the prisoner process
  * @param[out] pword pointer to a buffer at least 4 bytes in length
  * @return true on success, false otherwise
  */

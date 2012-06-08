@@ -1,3 +1,9 @@
+[2012/04/22] LIU Yu, <pineapple.liu@gmail.com>
+  * renamed symbols.{h,c,awk} -> internal.{h,c,awk} and moved some internal
+    directives from sandbox.h to internal.h
+  * in sandbox.spec and Makefile.in install src/internal.h to <sandbox-dev.h>
+  * in configure.in and sandbox.spec updated version to 0.3.4-1
+
 [2012/04/03] LIU Yu, <pineapple.liu@gmail.com>
   * in sandbox.c revised tracer / watcher interaction flow and resolved a dead-
     lock in the old implementation of FLUSH_ALL_EVENTS(); a new feature of the
@@ -187,7 +193,7 @@
   * in platform.h and platform.c added an `opt' argument to proc_probe() to
     specify probe targets
   * in sandbox.c change invocations of proc_probe() to reflect the above change
-  * in platform.c proc_dump() uses procfs to access target process
+  * in platform.c proc_dump() uses procfs to access the prisoner process
   * in platform.h added macros SYSCALL_ARG[1-5] and SYSRET_RETVAL for accessing
     arguments / ret values of system calls in a platform independent manner
   * in sandbox.c change the formation of SYSCALL and SYSRET events to reflect
@@ -236,7 +242,7 @@
 [2006/12/30] LIU Yu, <pineapple.liu@gmail.com>
   * in sandbox.c probe the prisoner process when it is stopped rather than it 
     receives SIGTRAP signal (resume the changes of 0.2.9-7)
-  * in sandbox.c pass the pid of targeted process via syscall event parameter
+  * in sandbox.c pass the pid of the prisoner process via syscall event param
   * in sandbox.spec and Makefile updated version to 0.2.10-4
   * canceled the pid parameter in syscall events
 
@@ -251,7 +257,7 @@
   
 [2006/12/12] LIU Yu, <pineapple.liu@gmail.com>
   * in platform.h and problem.c added `proc_dump' function for dumping data
-    from the specified address of targeted process.
+    from the specified address of the prisoner process.
   * in sandbox.spec and Makefile updated version to 0.2.10-1
   
 [2006/12/08] LIU Yu, <pineapple.liu@gmail.com>

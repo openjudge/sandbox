@@ -6,4 +6,5 @@ include setup.cfg
 include setup.py
 recursive-include packages *.h
 recursive-include packages *.c
+recursive-include packages *.cc
 recursive-include packages *.py

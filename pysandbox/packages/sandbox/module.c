@@ -30,8 +30,19 @@
  ******************************************************************************/
 
 #include "module.h"
+#include <bytesobject.h>       /* py3k forward compatibility */
+#include <sandbox-dev.h>       /* libsandbox internals */
 #include <pwd.h>               /* struct passwd, getpwnam(), getpwuid() */
 #include <grp.h>               /* struct group, getgrnam(), getgrgid() */
+
+#if PY_MAJOR_VERSION >= 3
+#define IS_PY3K 1
+#endif
+
+#ifdef __cplusplus
+extern "C"
+{
+#endif
 
 /* SandboxEventType */
 static PyObject * SandboxEvent_alloc(PyTypeObject *, PyObject *, PyObject *);
@@ -47,9 +58,11 @@ static PyMemberDef SandboxEventMembers[] =
  * raw.data as a 32bit int; in 64bit systems, 'data' still represents the first 
  * 32bit int, whereas 'ext0' represents the second 32bit int of raw.data */
 #ifdef __x86_64__
-    {"ext0", T_INT, offsetof(SandboxEvent, raw.data.__bitmap__.A) + 4, RESTRICTED, NULL},
+    {"ext0", T_INT, offsetof(SandboxEvent, raw.data.__bitmap__.A) + 4, 
+     RESTRICTED, NULL},
 #else
-    {"ext0", T_INT, offsetof(SandboxEvent, raw.data.__bitmap__.A), RESTRICTED, NULL},
+    {"ext0", T_INT, offsetof(SandboxEvent, raw.data.__bitmap__.A), 
+     RESTRICTED, NULL},
 #endif /* __x86_64__ */
     {"ext1", T_LONG, offsetof(SandboxEvent, raw.data.__bitmap__.B), RESTRICTED, 
      NULL},
@@ -68,8 +81,7 @@ static PyMemberDef SandboxEventMembers[] =
 
 static PyTypeObject SandboxEventType = 
 {
-    PyObject_HEAD_INIT(NULL)
-    0,                                        /* ob_size */
+    PyVarObject_HEAD_INIT(NULL, 0)
     "SandboxEvent",                           /* tp_name */
     sizeof(SandboxEvent),                     /* tp_basicsize */
     0,                                        /* tp_itemsize */
@@ -89,7 +101,7 @@ static PyTypeObject SandboxEventType =
     0,                                        /* tp_setattro */
     0,                                        /* tp_as_buffer */
     Py_TPFLAGS_DEFAULT,                       /* tp_flags */
-    0,                                        /* tp_doc */
+    DOC_TP_EVENT,                             /* tp_doc */
     0,                                        /* tp_traverse */
     0,                                        /* tp_clear */
     0,                                        /* tp_richcompare */
@@ -227,8 +239,7 @@ static PyMemberDef SandboxActionMembers[] =
 
 static PyTypeObject SandboxActionType = 
 {
-    PyObject_HEAD_INIT(NULL)
-    0,                                        /* ob_size */
+    PyVarObject_HEAD_INIT(NULL, 0)
     "SandboxAction",                          /* tp_name */
     sizeof(SandboxAction),                    /* tp_basicsize */
     0,                                        /* tp_itemsize */
@@ -248,7 +259,7 @@ static PyTypeObject SandboxActionType =
     0,                                        /* tp_setattro */
     0,                                        /* tp_as_buffer */
     Py_TPFLAGS_DEFAULT,                       /* tp_flags */
-    0,                                        /* tp_doc */
+    DOC_TP_ACTION,                            /* tp_doc */
     0,                                        /* tp_traverse */
     0,                                        /* tp_clear */
     0,                                        /* tp_richcompare */
@@ -374,8 +385,7 @@ static void SandboxPolicy_free(SandboxPolicy *);
 
 static PyTypeObject SandboxPolicyType = 
 {
-    PyObject_HEAD_INIT(NULL)
-    0,                                        /* ob_size */
+    PyVarObject_HEAD_INIT(NULL, 0)
     "SandboxPolicy",                          /* tp_name */
     sizeof(SandboxPolicy),                    /* tp_basicsize */
     0,                                        /* tp_itemsize */
@@ -395,7 +405,7 @@ static PyTypeObject SandboxPolicyType =
     0,                                        /* tp_setattro */
     0,                                        /* tp_as_buffer */
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
-    0,                                        /* tp_doc */
+    DOC_TP_POLICY,                            /* tp_doc */
     0,                                        /* tp_traverse */
     0,                                        /* tp_clear */
     0,                                        /* tp_richcompare */
@@ -472,10 +482,11 @@ SandboxPolicy_call(SandboxPolicy * self, PyObject * args, PyObject * keys)
      * baseline policy if more sophisticated sandboxing rules are desired. */
     
 #ifdef DELETED
-    SandboxPolicy_default_policy(
+    SandboxPolicy_default_policy
+#else
+    sandbox_default_policy
 #endif /* DELETED */
-    
-    sandbox_default_policy(
+    (
         NULL,
         SandboxEvent_AS_EVENT(pEvent), 
         SandboxAction_AS_ACTION(pAction)
@@ -569,12 +580,9 @@ static PyObject * Sandbox_stop(Sandbox *);
 
 static PyMethodDef SandboxMethods[] = 
 {
-    {"run", (PyCFunction)Sandbox_run, METH_NOARGS,
-     "Start to run the task and wait for its completion"},
-    {"probe", (PyCFunction)Sandbox_probe, METH_NOARGS,
-     "Probe the statistics collected by the sandbox"},
-    {"dump", (PyCFunction)Sandbox_dump, METH_VARARGS,
-     "Dump an object from the memory space of targeted program"},
+    {"dump", (PyCFunction)Sandbox_dump, METH_VARARGS, DOC_SANDBOX_DUMP},
+    {"probe", (PyCFunction)Sandbox_probe, METH_NOARGS, DOC_SANDBOX_PROBE},
+    {"run", (PyCFunction)Sandbox_run, METH_NOARGS, DOC_SANDBOX_RUN},
 #ifdef DELETED
     {"start", (PyCFunction)Sandbox_start, METH_NOARGS,
      "Start to run the task if it is ready and return immediately"},
@@ -589,9 +597,9 @@ static PyMethodDef SandboxMethods[] =
 static PyMemberDef SandboxMembers[] = 
 {
     {"status", T_INT, offsetof(Sandbox, sbox.status), READONLY, 
-     "Sandbox status (can be any of S_STATUS_*)"},
+     DOC_SANDBOX_STATUS},
     {"result", T_INT, offsetof(Sandbox, sbox.result), READONLY, 
-     "Sandbox result (can be any of S_RESULT_*)"},
+     DOC_SANDBOX_RESULT},
     {NULL, 0, 0, 0, NULL}       /* Sentinel */
 };
 
@@ -601,8 +609,7 @@ static void Sandbox_free(Sandbox *);
 
 static PyTypeObject SandboxType = 
 {
-    PyObject_HEAD_INIT(NULL)
-    0,                                        /* ob_size */
+    PyVarObject_HEAD_INIT(NULL, 0)
     "Sandbox",                                /* tp_name */
     sizeof(Sandbox),                          /* tp_basicsize */
     0,                                        /* tp_itemsize */
@@ -622,7 +629,7 @@ static PyTypeObject SandboxType =
     0,                                        /* tp_setattro */
     0,                                        /* tp_as_buffer */
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
-    0,                                        /* tp_doc */
+    DOC_TP_SANDBOX,                           /* tp_doc */
     0,                                        /* tp_traverse */
     0,                                        /* tp_clear */
     0,                                        /* tp_richcompare */
@@ -678,13 +685,55 @@ static int Sandbox_init_efd(PyObject *, int *);
 static int Sandbox_init_qta(PyObject *, res_t *);
 static int Sandbox_init_policy(PyObject *, PyObject * *);
 
+static int
+Integer_Check(PyObject * o)
+{
+    FUNC_BEGIN("%p", o);
+    assert(o);
+    
+    if (PyLong_Check(o))
+    {
+        FUNC_RET("%d", 1);
+    }
+#ifdef IS_PY3K
+    /* long() and int() types are unified in py3k */
+#else
+    if (PyInt_Check(o))
+    {
+        FUNC_RET("%d", 1);
+    }
+#endif
+    FUNC_RET("%d", 0);
+}
+
+static PyObject *
+UTF8Bytes_FromObject(PyObject * o)
+{
+    FUNC_BEGIN("%p", o);
+    assert(o);
+    
+    if (PyBytes_Check(o))
+    {
+        Py_INCREF(o);
+        FUNC_RET("%p", o);
+    }
+    
+    if (PyUnicode_Check(o))
+    {
+        FUNC_RET("%p", PyUnicode_AsUTF8String(o));
+    }
+    
+    PyErr_SetString(PyExc_TypeError, MSG_STR_TYPE_ERR);
+    FUNC_RET("%p", NULL);
+}
+
 static int 
 Sandbox_init(Sandbox * self, PyObject * args, PyObject * keys)
 {
     FUNC_BEGIN("%p,%p,%p", self, args, keys);
     assert(self && args);
     
-    self->sbox.ctrl.policy.entry = (policy_entry_t)Sandbox_policy_entry;
+    self->sbox.ctrl.policy.entry = (void *)Sandbox_policy_entry;
     self->sbox.ctrl.policy.data = (long)SandboxPolicy_New();
     
     static char * keywords[] = {
@@ -741,7 +790,7 @@ Sandbox_policy_entry(const policy_t * ppolicy, const event_t * pevent,
     }
     else
     {
-        if (PyObject_Compare(oAction, pAction) != 0)
+        if (PyObject_RichCompareBool(oAction, pAction, Py_NE))
         {
             Py_XDECREF(pAction);
             pAction = oAction;
@@ -765,19 +814,26 @@ Sandbox_init_comm(PyObject * o, command_t * pcmd)
     
     memset(&target, 0, sizeof(command_t));
     
-    int argc = 0;
+    size_t argc = 0;
     size_t offset = 0;
-    if (PyString_Check(o))
+    if (PyBytes_Check(o) || PyUnicode_Check(o))
     {
-        size_t delta = strlen(PyString_AS_STRING(o)) + 1;
+        o = UTF8Bytes_FromObject(o);
+        if (o == NULL)
+        {
+            FUNC_RET("%d", 0);
+        }
+        size_t delta = PyBytes_GET_SIZE(o) + 1;
         if (offset + delta < sizeof(target.buff))
         {
-            strcpy(target.buff, PyString_AS_STRING(o));
+            strcpy(target.buff, PyBytes_AS_STRING(o));
             target.args[argc++] = offset;
             offset += delta;
+            Py_DECREF(o);
         }
         else
         {
+            Py_DECREF(o);
             PyErr_SetString(PyExc_OverflowError, MSG_ARGS_TOO_LONG);
             FUNC_RET("%d", 0);
         }
@@ -786,30 +842,43 @@ Sandbox_init_comm(PyObject * o, command_t * pcmd)
     }
     else if (PySequence_Check(o))
     {
-        while (argc < PySequence_Size(o))
+        Py_ssize_t sz = PySequence_Size(o);
+        while ((sz > 0) && (argc < (size_t)sz))
         {
             PyObject * item = PySequence_GetItem(o, argc);
-            if (!PyString_Check(item))
+            if (PyBytes_Check(item) || PyUnicode_Check(item))
+            {
+                item = UTF8Bytes_FromObject(item);
+                if (item == NULL)
+                {
+                    FUNC_RET("%d", 0);
+                    break;
+                }
+                size_t delta  = PyBytes_GET_SIZE(item) + 1;
+                if (offset + delta >= sizeof(target.buff))
+                {
+                    Py_DECREF(item);
+                    PyErr_SetString(PyExc_OverflowError, MSG_ARGS_TOO_LONG);
+                    FUNC_RET("%d", 0);
+                    break;
+                }
+                if (argc + 1 >= sizeof(target.args) / sizeof(int))
+                {
+                    Py_DECREF(item);
+                    PyErr_SetString(PyExc_OverflowError, MSG_ARGS_TOO_LONG);
+                    FUNC_RET("%d", 0);
+                    break;
+                }
+                strcpy(target.buff + offset, PyBytes_AS_STRING(item));
+                target.args[argc++] = offset;
+                offset += delta;
+                Py_DECREF(item);
+            }
+            else
             {
                 PyErr_SetString(PyExc_TypeError, MSG_ARGS_TYPE_ERR);
                 FUNC_RET("%d", 0);
             }
-            size_t delta  = strlen(PyString_AS_STRING(item)) + 1;
-            if (offset + delta >= sizeof(target.buff))
-            {
-                PyErr_SetString(PyExc_OverflowError, MSG_ARGS_TOO_LONG);
-                FUNC_RET("%d", 0);
-                break;
-            }
-            if (argc + 1 >= sizeof(target.args) / sizeof(int))
-            {
-                PyErr_SetString(PyExc_OverflowError, MSG_ARGS_TOO_LONG);
-                FUNC_RET("%d", 0);
-                break;
-            }
-            strcpy(target.buff + offset, PyString_AS_STRING(item));
-            target.args[argc++] = offset;
-            offset += delta;
         }
         target.buff[offset] = '\0';
         target.args[argc] = -1;
@@ -850,16 +919,23 @@ Sandbox_init_jail(PyObject * o, char * jail)
     FUNC_BEGIN("%p,%p", o, jail);
     assert(o && jail);
     
-    char target[PATH_MAX] = {'/', '\0'};
+    char target[SBOX_PATH_MAX] = {'/', '\0'};
     
-    if (PyString_Check(o))
+    if (PyBytes_Check(o) || PyUnicode_Check(o))
     {
-        if (strlen(PyString_AS_STRING(o)) < sizeof(target))
+        o = UTF8Bytes_FromObject(o);
+        if (o == NULL)
         {
-            strcpy(target, PyString_AS_STRING(o));
+            FUNC_RET("%d", 0);
+        }
+        if (PyBytes_GET_SIZE(o) + 1 < sizeof(target))
+        {
+            strcpy(target, PyBytes_AS_STRING(o));
+            Py_DECREF(o);
         }
         else
         {
+            Py_DECREF(o);
             PyErr_SetString(PyExc_OverflowError, MSG_JAIL_TOO_LONG);
             FUNC_RET("%d", 0);
         }
@@ -905,18 +981,31 @@ Sandbox_init_uid(PyObject * o, uid_t * puid)
 
     struct passwd * pw = NULL;
     
-    if (PyString_Check(o))
+    if (PyBytes_Check(o) || PyUnicode_Check(o))
     {
-        if ((pw = getpwnam(PyString_AS_STRING(o))) == NULL)
+        o = UTF8Bytes_FromObject(o);
+        if (o == NULL)
         {
+            FUNC_RET("%d", 0);
+        }
+        if ((pw = getpwnam(PyBytes_AS_STRING(o))) != NULL)
+        {
+            uid = pw->pw_uid;
+            Py_DECREF(o);
+        }
+        else
+        {
+            Py_DECREF(o);
             PyErr_SetString(PyExc_ValueError, MSG_OWNER_MISSING);
             FUNC_RET("%d", 0);
         }
-        uid = pw->pw_uid;
     }
-    else if (PyInt_Check(o) || PyLong_Check(o))
+    else if (Integer_Check(o))
     {
-        if ((pw = getpwuid((uid_t)PyInt_AsLong(o))) == NULL)
+        PyObject * pylong = PyNumber_Long(o);
+        uid_t temp = (uid_t)PyLong_AsLong(pylong);
+        Py_XDECREF(pylong);
+        if ((pw = getpwuid(temp)) == NULL)
         {
             PyErr_SetString(PyExc_ValueError, MSG_OWNER_MISSING);
             FUNC_RET("%d", 0);
@@ -951,18 +1040,31 @@ Sandbox_init_gid(PyObject * o, gid_t * pgid)
     
     struct group * gr = NULL;
     
-    if (PyString_Check(o))
+    if (PyBytes_Check(o) || PyUnicode_Check(o))
     {
-        if ((gr = getgrnam(PyString_AS_STRING(o))) == NULL)
+        o = UTF8Bytes_FromObject(o);
+        if (o == NULL)
         {
+            FUNC_RET("%d", 0);
+        }
+        if ((gr = getgrnam(PyBytes_AS_STRING(o))) != NULL)
+        {
+            gid = gr->gr_gid;
+            Py_DECREF(o);
+        }
+        else
+        {
+            Py_DECREF(o);
             PyErr_SetString(PyExc_ValueError, MSG_GROUP_MISSING);
             FUNC_RET("%d", 0);
         }
-        gid = gr->gr_gid;
     }
-    else if (PyInt_Check(o) || PyLong_Check(o))
+    else if (Integer_Check(o))
     {
-        if ((gr = getgrgid((gid_t)PyInt_AsLong(o))) == NULL)
+        PyObject * pylong = PyNumber_Long(o);
+        gid_t temp = (gid_t)PyLong_AsLong(pylong);
+        Py_XDECREF(pylong);
+        if ((gr = getgrgid(temp)) == NULL)
         {
             PyErr_SetString(PyExc_ValueError, MSG_GROUP_MISSING);
             FUNC_RET("%d", 0);
@@ -992,13 +1094,14 @@ Sandbox_init_ifd(PyObject * o, int * pifd)
 {
     FUNC_BEGIN("%p,%p", o, pifd);
     
-    int ifd = STDIN_FILENO;
-    
-    if (PyFile_Check(o))
+    int ifd = PyObject_AsFileDescriptor(o);
+
+    if (PyErr_Occurred())
     {
-        ifd = fileno(PyFile_AsFile(o));
+        FUNC_RET("%d", 0);
     }
-    else
+    
+    if (ifd < 0)
     {
         PyErr_SetString(PyExc_TypeError, MSG_STDIN_TYPE_ERR);
         FUNC_RET("%d", 0);
@@ -1030,13 +1133,14 @@ Sandbox_init_ofd(PyObject * o, int * pofd)
 {
     FUNC_BEGIN("%p,%p", o, pofd);
     
-    int ofd = STDOUT_FILENO;
+    int ofd = PyObject_AsFileDescriptor(o);
     
-    if (PyFile_Check(o))
+    if (PyErr_Occurred())
     {
-        ofd = fileno(PyFile_AsFile(o));
+        FUNC_RET("%d", 0);
     }
-    else
+    
+    if (ofd < 0)
     {
         PyErr_SetString(PyExc_TypeError, MSG_STDOUT_TYPE_ERR);
         FUNC_RET("%d", 0);
@@ -1068,13 +1172,14 @@ Sandbox_init_efd(PyObject * o, int * pefd)
 {
     FUNC_BEGIN("%p,%p", o, pefd);
     
-    int efd = STDERR_FILENO;
+    int efd = PyObject_AsFileDescriptor(o);
     
-    if (PyFile_Check(o))
+    if (PyErr_Occurred())
     {
-        efd = fileno(PyFile_AsFile(o));
+        FUNC_RET("%d", 0);
     }
-    else
+    
+    if (efd < 0)
     {
         PyErr_SetString(PyExc_TypeError, MSG_STDERR_TYPE_ERR);
         FUNC_RET("%d", 0);
@@ -1101,6 +1206,39 @@ Sandbox_init_efd(PyObject * o, int * pefd)
     FUNC_RET("%d", 1);
 }
 
+static res_t
+SandboxQuota_FromPyObject(PyObject * o)
+{
+    FUNC_BEGIN("%p", o);
+    
+    PyObject * pyval = NULL;
+    
+    if (Integer_Check(o))
+    {
+        pyval = PyNumber_Long(o);
+    }
+    else
+    {
+        PyErr_SetString(PyExc_TypeError, MSG_QUOTA_TYPE_ERR);
+        FUNC_RET("%llu", (unsigned long long)RES_INFINITY);
+    }
+    
+    long long val = PyLong_AsLongLong(pyval);
+    
+    Py_XDECREF(pyval);
+    
+    if ((val > RES_INFINITY) || (val < 0))
+    {
+        if (!PyErr_Occurred())
+        {
+            PyErr_SetString(PyExc_ValueError, MSG_QUOTA_VAL_ERR);
+        }
+        FUNC_RET("%llu", (unsigned long long)RES_INFINITY);
+    }
+    
+    FUNC_RET("%llu", (unsigned long long)(res_t)val);
+}
+
 static int
 Sandbox_init_qta(PyObject * o, res_t * pqta)
 {
@@ -1110,19 +1248,20 @@ Sandbox_init_qta(PyObject * o, res_t * pqta)
     
     memset(quota, 0, QUOTA_TOTAL * sizeof(res_t));
     
-    const char * keys[QUOTA_TOTAL] = 
+    const char * keys[] = 
     {
         "wallclock",
         "cpu",
         "memory",
         "disk",
+        NULL                    /* Sentinel */
     };
     
     int t = 0;
     
     if (PyDict_Check(o))
     {
-        for (t = 0; t < QUOTA_TOTAL; t++)
+        for (t = 0; (t < QUOTA_TOTAL) && !PyErr_Occurred(); t++)
         {
             PyObject * value = NULL;
             if ((value = PyDict_GetItemString(o, (char *)keys[t])) == NULL)
@@ -1130,24 +1269,12 @@ Sandbox_init_qta(PyObject * o, res_t * pqta)
                 quota[t] = RES_INFINITY;
                 continue;
             }
-            if (PyString_Check(value))
-            {
-                quota[t] = atol(PyString_AS_STRING(value));
-            }
-            else if (PyInt_Check(value) || PyLong_Check(value))
-            {
-                quota[t] = PyInt_AsLong(value);
-            }
-            else
-            {
-                PyErr_SetString(PyExc_TypeError, MSG_QUOTA_TYPE_ERR);
-                FUNC_RET("%d", 0);
-            }
+            quota[t] = SandboxQuota_FromPyObject(value);
         }
     }
     else if (PySequence_Check(o))
     {
-        for (t = 0; t < QUOTA_TOTAL; t++)
+        for (t = 0; (t < QUOTA_TOTAL) && !PyErr_Occurred(); t++)
         {
             if (t > PySequence_Size(o))
             {
@@ -1158,31 +1285,22 @@ Sandbox_init_qta(PyObject * o, res_t * pqta)
             if ((value = PySequence_GetItem(o, t)) == NULL)
             {
                 PyErr_SetString(PyExc_IndexError, MSG_QUOTA_INVALID);
-                FUNC_RET("%d", 0);
+                break;
             }
-            if (PyString_Check(value))
-            {
-                quota[t] = atol(PyString_AS_STRING(value));
-            }
-            else if (PyInt_Check(value) || PyLong_Check(value))
-            {
-                quota[t] = PyInt_AsLong(value);
-            }
-            else
-            {
-                PyErr_SetString(PyExc_TypeError, MSG_QUOTA_TYPE_ERR);
-                FUNC_RET("%d", 0);
-            }
+            quota[t] = SandboxQuota_FromPyObject(value);
         }
     }
     else
     {
         PyErr_SetString(PyExc_TypeError, MSG_QUOTA_TYPE_ERR);
+    }
+    
+    if (PyErr_Occurred())
+    {
         FUNC_RET("%d", 0);
     }
-
-    memcpy(pqta, quota, QUOTA_TOTAL * sizeof(res_t));
     
+    memcpy(pqta, quota, QUOTA_TOTAL * sizeof(res_t));
     FUNC_RET("%d", 1);
 }
 
@@ -1221,7 +1339,7 @@ Sandbox_probe(Sandbox * self)
     /* Cannot probe a process that is not started */
     if (NOT_STARTED(&self->sbox))
     {
-        PyErr_SetString(PyExc_AssertionError, MSG_PROB_NOT_STARTED);
+        PyErr_SetString(PyExc_AssertionError, MSG_PROBE_NOT_STARTED);
         V(&self->sbox.mutex);
         FUNC_RET("%p", NULL);
     }
@@ -1247,7 +1365,9 @@ Sandbox_probe(Sandbox * self)
     PyObject * o = NULL;
     
     /* struct timespec to msec conversion */
+    #ifndef ts2ms
     #define ts2ms(a) ((((a).tv_sec) * 1000) + (((a).tv_nsec) / 1000000))
+    #endif
     
     PyDict_SetItemString(result, "elapsed", o = Py_BuildValue("k", \
         ts2ms(self->sbox.stat.elapsed)));
@@ -1289,7 +1409,7 @@ Sandbox_probe(Sandbox * self)
     Py_DECREF(o);
     
     /* The following fields are available from cpu_info and mem_info, and are
-     * no longer provided by the probe() method of the _sandbox.Sandbox class
+     * no longer maintained by the probe() method of the _sandbox.Sandbox class
      * in C module. For backward compatibility, sandbox.__init__.py provides a
      * derived Sandbox class, whose probe() method can generate these fields 
      * on-the-fly (except mem.nswap). */
@@ -1391,7 +1511,7 @@ Sandbox_dump(Sandbox * self, PyObject * args)
     
     if (!proc_probe(self->sbox.ctrl.pid, 0, (void *)&proc))
     {
-        PyErr_SetString(PyExc_RuntimeError, MSG_DUMP_PROB_FAILED);
+        PyErr_SetString(PyExc_RuntimeError, MSG_DUMP_PROBE_FAILED);
         V(&self->sbox.mutex);
         FUNC_RET("%p", NULL);
     }
@@ -1406,16 +1526,24 @@ Sandbox_dump(Sandbox * self, PyObject * args)
     
     switch (type)
     {
-    case T_BYTE:
-    case T_UBYTE:
-    case T_SHORT:
-    case T_USHORT:
-    case T_FLOAT:
-    case T_DOUBLE:
     case T_CHAR:
-        PyErr_SetString(PyExc_NotImplementedError, MSG_NO_IMPL);
-        result = Py_None;
-        Py_INCREF(Py_None);
+    case T_BYTE:
+        result = PyLong_FromLong((long)(char)data);
+        break;
+    case T_UBYTE:
+        result = PyLong_FromLong((long)(unsigned char)data);
+        break;
+    case T_SHORT:
+        result = PyLong_FromLong((long)(short)data);
+        break;
+    case T_USHORT:
+        result = PyLong_FromLong((long)(unsigned short)data);
+        break;
+    case T_FLOAT:
+        result = PyFloat_FromDouble((double)(float)data);
+        break;
+    case T_DOUBLE:
+        result = PyFloat_FromDouble((double)data);
         break;
     case T_INT:
         result = PyLong_FromLong((long)(int)data);
@@ -1424,13 +1552,13 @@ Sandbox_dump(Sandbox * self, PyObject * args)
         result = PyLong_FromUnsignedLong((unsigned long)(unsigned int)data);
         break;
     case T_LONG:
-        result = PyLong_FromLong(data);
+        result = PyLong_FromLong((long)data);
         break;
     case T_ULONG:
-        result = PyLong_FromUnsignedLong(data);
+        result = PyLong_FromUnsignedLong((unsigned long)data);
         break;
     case T_STRING:
-        result = PyString_FromString("");
+        result = PyBytes_FromString("");
         if (result != NULL)
         {
             while (true)
@@ -1443,7 +1571,8 @@ Sandbox_dump(Sandbox * self, PyObject * args)
                     {
                         goto fin_dump;
                     }
-                    PyString_ConcatAndDel(&result, PyString_FromFormat("%c", ch[i]));
+                    PyBytes_ConcatAndDel(&result, 
+                        PyBytes_FromFormat("%c", ch[i]));
                     addr++;
                 }
                 if (!proc_dump((const void *)&proc, (const void *)addr, &data))
@@ -1601,20 +1730,82 @@ sandbox_conv(Sandbox * self, PyObject * args)
 
 #endif /* DELETED */
 
-#ifndef PyMODINIT_FUNC  /* declarations for DLL import/export */
-#define PyMODINIT_FUNC void
-#endif
+#ifdef IS_PY3K
 
-PyMODINIT_FUNC
-init_sandbox(void)
+struct module_state 
 {
-    PROC_BEGIN();
+    PyObject * error;
+};
+
+#define MODULE_STATE(m) ((struct module_state *)PyModule_GetState(m))
+
+static int 
+module_traverse(PyObject * m, visitproc visit, void * arg) 
+{
+    Py_VISIT(MODULE_STATE(m)->error);
+    return 0;
+}
+
+static int 
+module_clear(PyObject * m) 
+{
+    Py_CLEAR(MODULE_STATE(m)->error);
+    return 0;
+}
+
+static struct PyModuleDef module_def = 
+{
+        PyModuleDef_HEAD_INIT,
+        "_sandbox",
+        NULL,
+        sizeof(struct module_state),
+        module_methods,
+        NULL,
+        module_traverse,
+        module_clear,
+        NULL
+};
+
+#define MODULE_INIT(x) PyObject * PyInit_ ## x (void)
+#define INIT_BEGIN FUNC_BEGIN
+#define INIT_RET(m) FUNC_RET("%p", m)
+
+#else /* Python 2 */
+
+#define MODULE_INIT(x) void init ## x (void)
+#define INIT_BEGIN PROC_BEGIN
+#define INIT_RET(m) PROC_END()
+
+#endif /* IS_PY3K */
+
+MODULE_INIT(_sandbox)
+{
+    INIT_BEGIN();
     
     PyObject * o = NULL;
     
     /* Initialize the sandbox module */
+#ifdef IS_PY3K
+    PyObject * module = PyModule_Create(&module_def);
+#else /* Python 2 */
     PyObject * module = Py_InitModule3("_sandbox", module_methods, 
         "sandbox module");
+#endif /* IS_PY3K */
+    
+    if (module == NULL)
+    {
+        INIT_RET(NULL);
+    }
+    
+#ifdef IS_PY3K
+    struct module_state *st = MODULE_STATE(module);
+    st->error = PyErr_NewException("_sandbox.Error", NULL, NULL);
+    if (st->error == NULL)
+    {
+        Py_DECREF(module);
+        INIT_RET(NULL);
+    }
+#endif /* IS_PY3K */
     
     /* Package version */
     if (PyObject_SetAttrString(module, "__version__", 
@@ -1622,7 +1813,8 @@ init_sandbox(void)
     {
         Py_DECREF(o);
         PyErr_SetString(PyExc_RuntimeError, MSG_ATTR_ADD_FAILED);
-        PROC_END();
+        Py_DECREF(module);
+        INIT_RET(NULL);
     }
     Py_DECREF(o);
     
@@ -1631,7 +1823,8 @@ init_sandbox(void)
     {
         Py_DECREF(o);
         PyErr_SetString(PyExc_RuntimeError, MSG_ATTR_ADD_FAILED);
-        PROC_END();
+        Py_DECREF(module);
+        INIT_RET(NULL);
     }
     Py_DECREF(o);
     
@@ -1640,7 +1833,8 @@ init_sandbox(void)
     if (SandboxEventType.tp_dict == NULL)
     {
         PyErr_SetString(PyExc_RuntimeError, MSG_ALLOC_FAILED);
-        PROC_END();
+        Py_DECREF(module);
+        INIT_RET(NULL);
     }
     
     /* Wrapper items for constants in event_type_t */
@@ -1667,26 +1861,29 @@ init_sandbox(void)
     if (PyType_Ready(&SandboxEventType) != 0)
     {
         PyErr_SetString(PyExc_AssertionError, MSG_TYPE_READY_FAILED);
-        PROC_END();
+        Py_DECREF(module);
+        INIT_RET(NULL);
     }
     
     /* Add SandboxEventType to sandbox module */
     Py_INCREF(&SandboxEventType);
     if (PyModule_AddObject(module, "SandboxEvent", 
-                           (PyObject *)&SandboxEventType) != 0)
+        (PyObject *)&SandboxEventType) != 0)
     {
         Py_DECREF(&SandboxEventType);
         PyErr_SetString(PyExc_RuntimeError, MSG_TYPE_ADD_FAILED);
-        PROC_END();
+        Py_DECREF(module);
+        INIT_RET(NULL);
     }
-    DBG("added SandboxEventType to module");
+    DBUG("added SandboxEventType to module");
     
     /* Prepare constant attributes for SandboxActionType */
     SandboxActionType.tp_dict = PyDict_New();
     if (SandboxActionType.tp_dict == NULL)
     {
         PyErr_SetString(PyExc_RuntimeError, MSG_ALLOC_FAILED);
-        PROC_END();
+        Py_DECREF(module);
+        INIT_RET(NULL);
     }
     
     /* Wrapper items for constants in action_type_t */
@@ -1704,44 +1901,49 @@ init_sandbox(void)
     if (PyType_Ready(&SandboxActionType) != 0)
     {
         PyErr_SetString(PyExc_AssertionError, MSG_TYPE_READY_FAILED);
-        PROC_END();
+        Py_DECREF(module);
+        INIT_RET(NULL);
     }
     
     /* Add SandboxActionType to sandbox module */
     Py_INCREF(&SandboxActionType);
     if (PyModule_AddObject(module, "SandboxAction", 
-                           (PyObject *)&SandboxActionType) != 0)
+        (PyObject *)&SandboxActionType) != 0)
     {
         Py_DECREF(&SandboxActionType);
         PyErr_SetString(PyExc_RuntimeError, MSG_TYPE_ADD_FAILED);
-        PROC_END();
+        Py_DECREF(module);
+        INIT_RET(NULL);
     }
-    DBG("added SandboxActionType to module");
+    DBUG("added SandboxActionType to module");
     
     /* Finalize the sandbox policy type */
     if (PyType_Ready(&SandboxPolicyType) != 0)
     {
         PyErr_SetString(PyExc_AssertionError, MSG_TYPE_READY_FAILED);
-        PROC_END();
+        Py_DECREF(module);
+        INIT_RET(NULL);
     }
     
     /* Add SandboxPolicyType to sandbox module */
     Py_INCREF(&SandboxPolicyType);
     if (PyModule_AddObject(module, "SandboxPolicy", 
-                           (PyObject *)&SandboxPolicyType) != 0)
+        (PyObject *)&SandboxPolicyType) != 0)
     {
         Py_DECREF(&SandboxPolicyType);
         PyErr_SetString(PyExc_RuntimeError, MSG_TYPE_ADD_FAILED);
-        PROC_END();
+        Py_DECREF(module);
+        INIT_RET(NULL);
     }
-    DBG("added SandboxPolicyType to module");
+    DBUG("added SandboxPolicyType to module");
     
     /* Prepare constant attributes for SandboxType */
     SandboxType.tp_dict = PyDict_New();
     if (SandboxType.tp_dict == NULL)
     {
         PyErr_SetString(PyExc_RuntimeError, MSG_ALLOC_FAILED);
-        PROC_END();
+        Py_DECREF(module);
+        INIT_RET(NULL);
     }
     
     /* Wrapper items for constants in quota_type_t */
@@ -1876,7 +2078,8 @@ init_sandbox(void)
     if (PyType_Ready(&SandboxType) != 0)
     {
         PyErr_SetString(PyExc_AssertionError, MSG_TYPE_READY_FAILED);
-        PROC_END();
+        Py_DECREF(module);
+        INIT_RET(NULL);
     }
     
     /* Add SandboxType to sandbox module */
@@ -1885,9 +2088,14 @@ init_sandbox(void)
     {
         Py_DECREF(&SandboxType);
         PyErr_SetString(PyExc_RuntimeError, MSG_TYPE_ADD_FAILED);
-        PROC_END();
+        Py_DECREF(module);
+        INIT_RET(NULL);
     }
-    DBG("added SandboxType to module");
+    DBUG("added SandboxType to module");
     
-    PROC_END();
+    INIT_RET(module);
 }
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif

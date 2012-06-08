@@ -31,17 +31,17 @@
 
 #include "platform.h"
 #include "sandbox.h"
-#include "symbols.h"
-#include <assert.h>             /* assert() */
+#include "internal.h"
+#include "config.h"
+
 #include <ctype.h>              /* toupper() */
 #include <fcntl.h>              /* open(), close(), O_RDONLY */
+#include <signal.h>             /* kill(), SIG* */
 #include <stdio.h>              /* read(), sscanf(), sprintf() */
 #include <string.h>             /* memset(), strsep() */
 #include <sys/types.h>          /* off_t */
 #include <sys/times.h>          /* struct tms, struct timeval */
 #include <unistd.h>             /* access(), lseek(), {R,F}_OK */
-
-#include "config.h"
 
 #ifdef HAVE_PTRACE
 #ifdef HAVE_SYS_PTRACE_H
@@ -85,18 +85,18 @@ static bool check_procfs(pid_t);
 
 typedef enum
 {
-    T_NOP = 0, 
-    T_ACK = 1, 
-    T_END = 2, 
-    T_NEXT = 3, 
-    T_GETREGS = 4, 
-    T_GETDATA = 5, 
-    T_GETSIGINFO = 6, 
-    T_SETREGS = 7,
-    T_SETDATA = 8,
-} act_t;
+    T_OPTION_NOP = 0, 
+    T_OPTION_ACK = 1, 
+    T_OPTION_END = 2, 
+    T_OPTION_NEXT = 3, 
+    T_OPTION_GETREGS = 4, 
+    T_OPTION_GETDATA = 5, 
+    T_OPTION_GETSIGINFO = 6, 
+    T_OPTION_SETREGS = 7,
+    T_OPTION_SETDATA = 8,
+} option_t;
 
-static long __trace(act_t, proc_t * const, void * const, long * const);
+static long __trace(option_t, proc_t * const, void * const, long * const);
 
 bool
 proc_bind(const void * const dummy, proc_t * const pproc)
@@ -132,7 +132,7 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
     
     if (!check_procfs(pid))
     {
-        WARNING("procfs entries missing or invalid");
+        WARN("procfs entries missing or invalid");
         FUNC_RET("%d", false);
     }
     
@@ -142,7 +142,7 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
     int fd = open(buffer, O_RDONLY);
     if (fd < 0)
     {
-        WARNING("procfs stat missing or unaccessable");
+        WARN("procfs stat missing or unaccessable");
         FUNC_RET("%d", false);
     }
     
@@ -152,7 +152,7 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
 
     if (len < 0)
     {
-        WARNING("failed to grab stat from procfs");
+        WARN("failed to grab stat from procfs");
         FUNC_RET("%d", false);
     }
 
@@ -262,20 +262,20 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
     TS_UPDATE_CLK(&pproc->cutime, tm.tms_cutime);
     TS_UPDATE_CLK(&pproc->cstime, tm.tms_cstime);
     
-    DBG("proc.pid                    % 10d", pproc->pid);
-    DBG("proc.ppid                   % 10d", pproc->ppid);
-    DBG("proc.state                           %c", pproc->state);
-    DBG("proc.flags          0x%016lx", pproc->flags);
-    DBG("proc.utime                  %010lu", ts2ms(pproc->utime));
-    DBG("proc.stime                  %010lu", ts2ms(pproc->stime));
-    DBG("proc.cutime                 % 10ld", ts2ms(pproc->cutime));
-    DBG("proc.cstime                 % 10ld", ts2ms(pproc->cstime));
-    DBG("proc.minflt                 %010lu", pproc->minflt);
-    DBG("proc.cminflt                %010lu", pproc->cminflt);
-    DBG("proc.majflt                 %010lu", pproc->majflt);
-    DBG("proc.cmajflt                %010lu", pproc->cmajflt);
-    DBG("proc.vsize                  %010lu", pproc->vsize);
-    DBG("proc.rss                    % 10ld", pproc->rss);
+    DBUG("proc.pid                    % 10d", pproc->pid);
+    DBUG("proc.ppid                   % 10d", pproc->ppid);
+    DBUG("proc.state                           %c", pproc->state);
+    DBUG("proc.flags          0x%016lx", pproc->flags);
+    DBUG("proc.utime                  %010lu", ts2ms(pproc->utime));
+    DBUG("proc.stime                  %010lu", ts2ms(pproc->stime));
+    DBUG("proc.cutime                 % 10ld", ts2ms(pproc->cutime));
+    DBUG("proc.cstime                 % 10ld", ts2ms(pproc->cstime));
+    DBUG("proc.minflt                 %010lu", pproc->minflt);
+    DBUG("proc.cminflt                %010lu", pproc->cminflt);
+    DBUG("proc.majflt                 %010lu", pproc->majflt);
+    DBUG("proc.cmajflt                %010lu", pproc->cmajflt);
+    DBUG("proc.vsize                  %010lu", pproc->vsize);
+    DBUG("proc.rss                    % 10ld", pproc->rss);
     
 #else
 #warning "proc_probe() requires procfs"
@@ -284,56 +284,56 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
     /* Inspect process registers */
     if (opt & PROBE_REGS)
     {
-        if (__trace(T_GETREGS, pproc, NULL, NULL) != 0)
+        if (__trace(T_OPTION_GETREGS, pproc, NULL, NULL) != 0)
         {
             FUNC_RET("%d", false);
         }
 #ifdef __x86_64__
-        DBG("regs.r15            0x%016lx", pproc->regs.r15);
-        DBG("regs.r14            0x%016lx", pproc->regs.r14);
-        DBG("regs.r13            0x%016lx", pproc->regs.r13);
-        DBG("regs.r12            0x%016lx", pproc->regs.r12);
-        DBG("regs.rbp            0x%016lx", pproc->regs.rbp);
-        DBG("regs.rbx            0x%016lx", pproc->regs.rbx);
-        DBG("regs.r11            0x%016lx", pproc->regs.r11);
-        DBG("regs.r10            0x%016lx", pproc->regs.r10);
-        DBG("regs.r9             0x%016lx", pproc->regs.r9);
-        DBG("regs.r8             0x%016lx", pproc->regs.r8);
-        DBG("regs.rax            0x%016lx", pproc->regs.rax);
-        DBG("regs.rcx            0x%016lx", pproc->regs.rcx);
-        DBG("regs.rdx            0x%016lx", pproc->regs.rdx);
-        DBG("regs.rsi            0x%016lx", pproc->regs.rsi);
-        DBG("regs.rdi            0x%016lx", pproc->regs.rdi);
-        DBG("regs.orig_rax       0x%016lx", pproc->regs.orig_rax);
-        DBG("regs.rip            0x%016lx", pproc->regs.rip);
-        DBG("regs.cs             0x%016lx", pproc->regs.cs);
-        DBG("regs.eflags         0x%016lx", pproc->regs.eflags);
-        DBG("regs.rsp            0x%016lx", pproc->regs.rsp);
-        DBG("regs.ss             0x%016lx", pproc->regs.ss);
-        DBG("regs.fs_base        0x%016lx", pproc->regs.fs_base);
-        DBG("regs.gs_base        0x%016lx", pproc->regs.gs_base);
-        DBG("regs.ds             0x%016lx", pproc->regs.ds);
-        DBG("regs.es             0x%016lx", pproc->regs.es);
-        DBG("regs.fs             0x%016lx", pproc->regs.fs);
-        DBG("regs.gs             0x%016lx", pproc->regs.gs);
+        DBUG("regs.r15            0x%016lx", pproc->regs.r15);
+        DBUG("regs.r14            0x%016lx", pproc->regs.r14);
+        DBUG("regs.r13            0x%016lx", pproc->regs.r13);
+        DBUG("regs.r12            0x%016lx", pproc->regs.r12);
+        DBUG("regs.rbp            0x%016lx", pproc->regs.rbp);
+        DBUG("regs.rbx            0x%016lx", pproc->regs.rbx);
+        DBUG("regs.r11            0x%016lx", pproc->regs.r11);
+        DBUG("regs.r10            0x%016lx", pproc->regs.r10);
+        DBUG("regs.r9             0x%016lx", pproc->regs.r9);
+        DBUG("regs.r8             0x%016lx", pproc->regs.r8);
+        DBUG("regs.rax            0x%016lx", pproc->regs.rax);
+        DBUG("regs.rcx            0x%016lx", pproc->regs.rcx);
+        DBUG("regs.rdx            0x%016lx", pproc->regs.rdx);
+        DBUG("regs.rsi            0x%016lx", pproc->regs.rsi);
+        DBUG("regs.rdi            0x%016lx", pproc->regs.rdi);
+        DBUG("regs.orig_rax       0x%016lx", pproc->regs.orig_rax);
+        DBUG("regs.rip            0x%016lx", pproc->regs.rip);
+        DBUG("regs.cs             0x%016lx", pproc->regs.cs);
+        DBUG("regs.eflags         0x%016lx", pproc->regs.eflags);
+        DBUG("regs.rsp            0x%016lx", pproc->regs.rsp);
+        DBUG("regs.ss             0x%016lx", pproc->regs.ss);
+        DBUG("regs.fs_base        0x%016lx", pproc->regs.fs_base);
+        DBUG("regs.gs_base        0x%016lx", pproc->regs.gs_base);
+        DBUG("regs.ds             0x%016lx", pproc->regs.ds);
+        DBUG("regs.es             0x%016lx", pproc->regs.es);
+        DBUG("regs.fs             0x%016lx", pproc->regs.fs);
+        DBUG("regs.gs             0x%016lx", pproc->regs.gs);
 #else /* __i386__ */
-        DBG("regs.ebx            0x%016lx", pproc->regs.ebx);
-        DBG("regs.ecx            0x%016lx", pproc->regs.ecx);
-        DBG("regs.edx            0x%016lx", pproc->regs.edx);
-        DBG("regs.esi            0x%016lx", pproc->regs.esi);
-        DBG("regs.edi            0x%016lx", pproc->regs.edi);
-        DBG("regs.ebp            0x%016lx", pproc->regs.ebp);
-        DBG("regs.eax            0x%016lx", pproc->regs.eax);
-        DBG("regs.xds            0x%016lx", pproc->regs.xds);
-        DBG("regs.xes            0x%016lx", pproc->regs.xes);
-        DBG("regs.xfs            0x%016lx", pproc->regs.xfs);
-        DBG("regs.xgs            0x%016lx", pproc->regs.xgs);
-        DBG("regs.orig_eax       0x%016lx", pproc->regs.orig_eax);
-        DBG("regs.eip            0x%016lx", pproc->regs.eip);
-        DBG("regs.xcs            0x%016lx", pproc->regs.xcs);
-        DBG("regs.eflags         0x%016lx", pproc->regs.eflags);
-        DBG("regs.esp            0x%016lx", pproc->regs.esp);
-        DBG("regs.xss            0x%016lx", pproc->regs.xss);
+        DBUG("regs.ebx            0x%016lx", pproc->regs.ebx);
+        DBUG("regs.ecx            0x%016lx", pproc->regs.ecx);
+        DBUG("regs.edx            0x%016lx", pproc->regs.edx);
+        DBUG("regs.esi            0x%016lx", pproc->regs.esi);
+        DBUG("regs.edi            0x%016lx", pproc->regs.edi);
+        DBUG("regs.ebp            0x%016lx", pproc->regs.ebp);
+        DBUG("regs.eax            0x%016lx", pproc->regs.eax);
+        DBUG("regs.xds            0x%016lx", pproc->regs.xds);
+        DBUG("regs.xes            0x%016lx", pproc->regs.xes);
+        DBUG("regs.xfs            0x%016lx", pproc->regs.xfs);
+        DBUG("regs.xgs            0x%016lx", pproc->regs.xgs);
+        DBUG("regs.orig_eax       0x%016lx", pproc->regs.orig_eax);
+        DBUG("regs.eip            0x%016lx", pproc->regs.eip);
+        DBUG("regs.xcs            0x%016lx", pproc->regs.xcs);
+        DBUG("regs.eflags         0x%016lx", pproc->regs.eflags);
+        DBUG("regs.esp            0x%016lx", pproc->regs.esp);
+        DBUG("regs.xss            0x%016lx", pproc->regs.xss);
 #endif /* __x86_64__ */
     }
     
@@ -351,25 +351,25 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
             addr -= 2; /* backoff 2 bytes in system call tracing mode */
         }
         
-        if (__trace(T_GETDATA, pproc, (void *)addr, (long *)&pproc->op) != 0)
+        if (__trace(T_OPTION_GETDATA, pproc, (void *)addr, (long *)&pproc->op) != 0)
         {
             FUNC_RET("%d", false);
         }
         
-        DBG("proc.op             0x%016lx", pproc->op);
+        DBUG("proc.op             0x%016lx", pproc->op);
     }
     
     /* Inspect signal information */
     if (opt & PROBE_SIGINFO)
     {
-        if (__trace(T_GETSIGINFO, pproc, NULL, NULL) != 0)
+        if (__trace(T_OPTION_GETSIGINFO, pproc, NULL, NULL) != 0)
         {
             FUNC_RET("%d", false);
         }
 
-        DBG("proc.siginfo.si_signo       % 10d", pproc->siginfo.si_signo);
-        DBG("proc.siginfo.si_errno       % 10d", pproc->siginfo.si_errno);
-        DBG("proc.siginfo.si_code        % 10d", pproc->siginfo.si_code);
+        DBUG("proc.siginfo.si_signo       % 10d", pproc->siginfo.si_signo);
+        DBUG("proc.siginfo.si_errno       % 10d", pproc->siginfo.si_errno);
+        DBUG("proc.siginfo.si_code        % 10d", pproc->siginfo.si_code);
     }
     
     FUNC_RET("%d", true);
@@ -459,7 +459,7 @@ syscall_mode(proc_t * const pproc)
     }
     
     unsigned long code;
-    if (__trace(T_GETDATA, pproc, addr, (long *)&code) != 0)
+    if (__trace(T_OPTION_GETDATA, pproc, addr, (long *)&code) != 0)
     {
         FUNC_RET("%d", SCMODE_MAX);
     }
@@ -472,12 +472,12 @@ syscall_mode(proc_t * const pproc)
             (OPCODE16(code) == OP_SYSCALL))
         {
             addr += offset;
-            if (__trace(T_GETDATA, pproc, addr, (long *)&pproc->op) != 0)
+            if (__trace(T_OPTION_GETDATA, pproc, addr, (long *)&pproc->op) != 0)
             {
                 FUNC_RET("%d", SCMODE_MAX);
             }
-            DBG("vsyscall_addr       0x%016lx", addr);
-            DBG("vsyscall_code       0x%016lx", pproc->op);
+            DBUG("vsyscall_addr       0x%016lx", (unsigned long)addr);
+            DBUG("vsyscall_code       0x%016lx", pproc->op);
             break;
         }
         code = (code >> 8);
@@ -501,36 +501,36 @@ proc_dump(const proc_t * const pproc, const void * const addr,
         FUNC_RET("%d", false);
     }
     
-    if (__trace(T_GETDATA, (proc_t *)pproc, (void *)addr, pword) != 0)
+    if (__trace(T_OPTION_GETDATA, (proc_t *)pproc, (void *)addr, pword) != 0)
     {
         FUNC_RET("%d", false);
     }    
     
-    DBG("data.%p     0x%016lx", addr, *pword);
+    DBUG("data.%p     0x%016lx", addr, *pword);
     
 #ifdef DELETED
 #ifdef HAVE_PROCFS
-    /* Access the memory of targeted process via procfs */
+    /* Access the memory of the prisoner process via procfs */
     char buffer[4096];
 
     sprintf(buffer, PROCFS "/%d/mem", pproc->pid);
     if (access(buffer, R_OK | F_OK) < 0)
     {
-        WARNING("procfs entries missing or invalid");
+        WARN("procfs entries missing or invalid");
         FUNC_RET("%d", false);
     }
 
-    /* Copy a word from targeted address */
+    /* Copy a word from the specified address */
     int fd = open(buffer, O_RDONLY);
     if (lseek(fd, (off_t)addr, SEEK_SET) < 0)
     {
         extern int errno;
-        WARNING("lseek(%d, %p, SEEK_SET) failes, ERRNO %d", fd, addr, errno);
+        WARN("lseek(%d, %p, SEEK_SET) failes, ERRNO %d", fd, addr, errno);
         FUNC_RET("%d", false);
     }
     if (read(fd, (void *)pword, sizeof(unsigned long)) < 0)
     {
-        WARNING("read");
+        WARN("read");
         FUNC_RET("%d", false);
     }
     close(fd);
@@ -564,7 +564,7 @@ trace_hack(proc_t * const pproc)
     assert(pproc);
     
 #ifdef DELETED
-    bool res = (__trace(T_SETREGS, pproc, NULL, NULL) == 0);
+    bool res = (__trace(T_OPTION_SETREGS, pproc, NULL, NULL) == 0);
     
     FUNC_RET("%d", res);
 #else    
@@ -579,7 +579,7 @@ trace_next(proc_t * const pproc, trace_type_t type)
     assert(pproc);
     
     long opt = (long)type;
-    bool res = (__trace(T_NEXT, pproc, NULL, &opt) == 0);
+    bool res = (__trace(T_OPTION_NEXT, pproc, NULL, &opt) == 0);
     
     FUNC_RET("%d", res);
 }
@@ -607,7 +607,7 @@ trace_kill(proc_t * const pproc, int signo)
             unsigned char * addr = (unsigned char *)pproc->regs.eip;
             unsigned long nop = 0x90909090UL;
 #endif /* __x86_64__ */        
-            __trace(T_SETDATA, pproc, (void *)addr, (long *)&nop);
+            __trace(T_OPTION_SETDATA, pproc, (void *)addr, (long *)&nop);
         }
     }
     
@@ -631,7 +631,7 @@ trace_kill(proc_t * const pproc, int signo)
         {
             pproc->regs.ORIG_NAX = scno;
         }
-        __trace(T_SETREGS, (proc_t *)pproc, NULL, NULL);
+        __trace(T_OPTION_SETREGS, (proc_t *)pproc, NULL, NULL);
     }
 #endif /* DELETED */
     
@@ -644,7 +644,7 @@ trace_end(const proc_t * const pproc)
     FUNC_BEGIN("%p", pproc);
     assert(pproc);
     
-    bool res = (__trace(T_END, (proc_t *)pproc, NULL, NULL) == 0);
+    bool res = (__trace(T_OPTION_END, (proc_t *)pproc, NULL, NULL) == 0);
     
     FUNC_RET("%d", res);
 }
@@ -652,24 +652,24 @@ trace_end(const proc_t * const pproc)
 /* Most trace_*() functions directly or indirectly invokes ptrace() in linux. 
  * But ptrace() only works when called from the *main* thread initially started 
  * tracing the prisoner process (and thus being the parent of the latter). The 
- * workaround is to make __trace() asynchronous. It places the desired action 
+ * workaround is to make __trace() asynchronous. It places the desired option 
  * (and input) into a set of global variables, and waits for trace_main() to 
- * perform the desired actions by calling __trace_impl(), which then calls 
+ * perform the desired options by calling __trace_impl(), which then calls 
  * ptrace(). trace_main() is guaranteed to be running in the *main* thread. */
 
 #define NO_ACTION(act) \
-    (((act) == T_NOP) || ((act) == T_ACK)) \
+    (((act) == T_OPTION_NOP) || ((act) == T_OPTION_ACK)) \
 /* NO_ACTION */
 
 static long
-__trace_impl(act_t action, proc_t * const pproc, void * const addr, 
+__trace_impl(option_t option, proc_t * const pproc, void * const addr, 
     long * const pdata)
 {
-    FUNC_BEGIN("%d,%p,%p,%p", action, pproc, addr, pdata);
-    assert(!NO_ACTION(action));
+    FUNC_BEGIN("%d,%p,%p,%p", option, pproc, addr, pdata);
+    assert(!NO_ACTION(option));
     assert(pproc);
     
-    if (action == T_END)
+    if (option == T_OPTION_END)
     {
         FUNC_RET("%ld", 0L);
     }
@@ -683,9 +683,9 @@ __trace_impl(act_t action, proc_t * const pproc, void * const addr,
     }
     
 #ifdef HAVE_PTRACE
-    switch (action)
+    switch (option)
     {
-    case T_NEXT:
+    case T_OPTION_NEXT:
         assert(pdata);
         pproc->tflags.single_step = ((int)(*pdata) == TRACE_SINGLE_STEP);
         if (pproc->tflags.single_step)
@@ -697,16 +697,16 @@ __trace_impl(act_t action, proc_t * const pproc, void * const addr,
             res = ptrace(PTRACE_SYSCALL, pid, NULL, NULL);
         }
         break;
-    case T_GETREGS:
+    case T_OPTION_GETREGS:
         res = ptrace(PTRACE_GETREGS, pid, NULL, (void *)&pproc->regs);
         break;
-    case T_SETREGS:
+    case T_OPTION_SETREGS:
         res = ptrace(PTRACE_SETREGS, pid, NULL, (void *)&pproc->regs);
         break;
-    case T_GETSIGINFO:
+    case T_OPTION_GETSIGINFO:
         res = ptrace(PTRACE_GETSIGINFO, pid, NULL, (void *)&pproc->siginfo);
         break;
-    case T_GETDATA:
+    case T_OPTION_GETDATA:
         assert(addr);
         {
             long temp = ptrace(PTRACE_PEEKDATA, pid, addr, NULL);
@@ -714,7 +714,7 @@ __trace_impl(act_t action, proc_t * const pproc, void * const addr,
             *pdata = (res != 0)?(*pdata):(temp);
         }
         break;
-    case T_SETDATA:
+    case T_OPTION_SETDATA:
         assert(addr);
         {
             res = ptrace(PTRACE_POKEDATA, pid, addr, *pdata);
@@ -733,7 +733,7 @@ __trace_impl(act_t action, proc_t * const pproc, void * const addr,
 
 typedef struct
 {
-    act_t action;
+    option_t option;
     proc_t * pproc;
     void * addr;
     long data;
@@ -742,46 +742,46 @@ typedef struct
 
 static pthread_mutex_t trace_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t trace_notice = PTHREAD_COND_INITIALIZER;
-static trace_info_t trace_info = {T_NOP, NULL, NULL, 0, 0};
+static trace_info_t trace_info = {T_OPTION_NOP, NULL, NULL, 0, 0};
 
 static long
-__trace(act_t action, proc_t * const pproc, void * const addr, 
+__trace(option_t option, proc_t * const pproc, void * const addr, 
     long * const pdata)
 {
-    FUNC_BEGIN("%d,%p,%p,%p", action, pproc, addr, pdata);
-    assert(!NO_ACTION(action));
+    FUNC_BEGIN("%d,%p,%p,%p", option, pproc, addr, pdata);
+    assert(!NO_ACTION(option));
     assert(pproc);
     
     /* Shortcut to synchronous trace */
-    if ((pproc->tflags.trace_id == pthread_self()) && (action != T_END))
+    if ((pproc->tflags.trace_id == pthread_self()) && (option != T_OPTION_END))
     {
-        FUNC_RET("%ld", __trace_impl(action, pproc, addr, pdata));
+        FUNC_RET("%ld", __trace_impl(option, pproc, addr, pdata));
     }
     
     long res = 0;
     
     P(&trace_mutex);
     
-    /* Wait while an existing action is being performed */
-    while (trace_info.action != T_NOP)
+    /* Wait while an existing option is being performed */
+    while (trace_info.option != T_OPTION_NOP)
     {
-        DBG("waiting for slot");
+        DBUG("waiting for trace slot");
         pthread_cond_wait(&trace_notice, &trace_mutex);
     }
     
-    DBG("obtained slot");
+    DBUG("obtained trace slot");
     
     /* Propose the request */
-    trace_info.action = action;
+    trace_info.option = option;
     trace_info.pproc = pproc;
     trace_info.addr = addr;
     trace_info.data = ((pdata != NULL)?(*pdata):(0));
     trace_info.result = 0;
     
-    /* Wait while the action is being performed */
-    while (trace_info.action != T_ACK)
+    /* Wait while the option is being performed */
+    while (trace_info.option != T_OPTION_ACK)
     {
-        DBG("requesting action %s", trace_act_name(trace_info.action));
+        DBUG("requesting trace option: %s", t_option_name(trace_info.option));
         pthread_cond_broadcast(&trace_notice);
         pthread_cond_wait(&trace_notice, &trace_mutex);
     }
@@ -792,17 +792,17 @@ __trace(act_t action, proc_t * const pproc, void * const addr,
     }
     res = trace_info.result;
     
-    DBG("collected results");
+    DBUG("collected trace results");
     
     /* Release slot */
-    trace_info.action = T_NOP;
+    trace_info.option = T_OPTION_NOP;
     trace_info.pproc = NULL;
     trace_info.addr = NULL;
     trace_info.data = 0;
     trace_info.result = 0;
     pthread_cond_broadcast(&trace_notice);
     
-    DBG("released slot");
+    DBUG("released trace slot");
     
     V(&trace_mutex);
     
@@ -814,7 +814,6 @@ trace_main(void * const dummy)
 {
     FUNC_BEGIN("%p", dummy);
     assert(dummy);
-    
     sandbox_t * psbox = (sandbox_t *)dummy;
     
     if (psbox == NULL)
@@ -822,18 +821,18 @@ trace_main(void * const dummy)
         FUNC_RET("%p", (void *)NULL);
     }
     
-    /* Detect and perform actions while the sandbox is running */
+    /* Detect and perform options while the sandbox is running */
     bool end = false;
     
     P(&trace_mutex);
     while (!end)
     {
-        /* Wait for an action request */
-        if (NO_ACTION(trace_info.action))
+        /* Wait for an option request */
+        if (NO_ACTION(trace_info.option))
         {
-            DBG("waiting for new action");
+            DBUG("waiting for new trace option");
             pthread_cond_wait(&trace_notice, &trace_mutex);
-            if (NO_ACTION(trace_info.action))
+            if (NO_ACTION(trace_info.option))
             {
                 continue;
             }
@@ -845,27 +844,27 @@ trace_main(void * const dummy)
             continue;
         }
         
-        DBG("received %s", trace_act_name(trace_info.action));
+        DBUG("received trace option: %s", t_option_name(trace_info.option));
         
-        if (trace_info.action == T_END)
+        if (trace_info.option == T_OPTION_END)
         {
             end = true;
         }
         
-        trace_info.result = __trace_impl(trace_info.action, trace_info.pproc,
+        trace_info.result = __trace_impl(trace_info.option, trace_info.pproc,
             trace_info.addr, &trace_info.data);
         
         /* Notify the trace_*() to collect results */
-        trace_info.action = T_ACK;
+        trace_info.option = T_OPTION_ACK;
         
-        while (trace_info.action == T_ACK)
+        while (trace_info.option == T_OPTION_ACK)
         {
-            DBG("sending %s", trace_act_name(T_ACK));
+            DBUG("sending trace option: %s", t_option_name(T_OPTION_ACK));
             pthread_cond_broadcast(&trace_notice);
             pthread_cond_wait(&trace_notice, &trace_mutex);
         }
         
-        DBG("sent %s", trace_act_name(T_ACK));
+        DBUG("sent trace option: %s", t_option_name(T_OPTION_ACK));
     }
     V(&trace_mutex);
     

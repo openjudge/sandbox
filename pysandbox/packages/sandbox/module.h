@@ -31,7 +31,16 @@
 #ifndef __OJS_MODULE_H__
 #define __OJS_MODULE_H__
 
+/* <sandbox.h> SHOULD be included before <Python.h>, because the latter alters
+ * macro definitions in standard C headers in a werid way, and may cause structs
+ * in <sandbox.h> to become inconsistent with the pre-compiled libsandbox. Such 
+ * inconsistency sometimes crashes the sandbox during initialization. */
+
 #include <sandbox.h>
+
+#undef _POSIX_C_SOURCE
+#undef _XOPEN_SOURCE
+
 #include <Python.h>
 #include <structmember.h>
 
@@ -63,20 +72,62 @@ typedef struct
     sandbox_t sbox;
 } Sandbox;
 
-#ifdef __cplusplus
-}
-#endif
+/* Inline help messages */
+
+#ifndef DOC_TP_EVENT
+#define DOC_TP_EVENT            0
+#endif /* DOC_TP_EVENT */
+
+#ifndef DOC_TP_ACTION
+#define DOC_TP_ACTION           0
+#endif /* DOC_TP_ACTION */
+
+#ifndef DOC_TP_POLICY
+#define DOC_TP_POLICY           0
+#endif /* DOC_TP_POLICY */
+
+#ifndef DOC_TP_SANDBOX
+#define DOC_TP_SANDBOX          0
+#endif /* DOC_TP_SANDBOX */
+
+#ifndef DOC_SANDBOX_STATUS
+#define DOC_SANDBOX_STATUS      "Runtime state of the sandbox instance "\
+                                "(can be any of S_STATUS_*)"
+#endif /* DOC_SANDBOX_STATUS */
+
+#ifndef DOC_SANDBOX_RESULT
+#define DOC_SANDBOX_RESULT      "Terminating state of the targeted program " \
+                                "(can be any of S_RESULT_*)"
+#endif /* DOC_SANDBOX_RESULT */
+
+#ifndef DOC_SANDBOX_DUMP
+#define DOC_SANDBOX_DUMP        "Dump an object from the memory space of the " \
+                                "targeted program"
+#endif /* DOC_SANDBOX_DUMP */
+
+#ifndef DOC_SANDBOX_PROBE    
+#define DOC_SANDBOX_PROBE       "Probe the statistics collected by the sandbox"
+#endif /* DOC_SANDBOX_PROBE */
+
+#ifndef DOC_SANDBOX_RUN
+#define DOC_SANDBOX_RUN         "Start to run the task and wait for its " \
+                                "completion"
+#endif /* DOC_SANDBOX_RUN */
+
+/* Error messages */
+
+#define MSG_STR_OR_SEQ          "string or sequence of strings"
+
+#define MSG_STR_TYPE_ERR        "should be a string or unicode"
 
 #define MSG_ARGS_TOO_LONG       "command line too long"
-#define MSG_ARGS_TYPE_ERR       "command line should be a string or list of " \
-                                "strings"
-#define MSG_ARGS_VAL_ERR        "command line should be a string or list of " \
-                                "strings"
+#define MSG_ARGS_TYPE_ERR       "command line should be a " MSG_STR_OR_SEQ
+#define MSG_ARGS_VAL_ERR        "command line should be a " MSG_STR_OR_SEQ
 #define MSG_ARGS_INVALID        "command line should contain full path to an " \
                                 "executable"
 
 #define MSG_JAIL_TOO_LONG       "program jail too long"
-#define MSG_JAIL_TYPE_ERR       "program jail should be a string"
+#define MSG_JAIL_TYPE_ERR       "program jail should be a string or unicode"
 #define MSG_JAIL_INVALID        "program jail should be a valid path"
 #define MSG_JAIL_NOPERM         "only super-user can chroot"
 
@@ -99,6 +150,7 @@ typedef struct
 
 #define MSG_QUOTA_TYPE_ERR      "quota should be a list or dictionary of " \
                                 "integers"
+#define MSG_QUOTA_VAL_ERR       "quota value is invalid"
 #define MSG_QUOTA_INVALID       "failed accessing element from quota list"
 
 #define MSG_POLICY_TYPE_ERR     "policy should be a callable object"
@@ -113,10 +165,14 @@ typedef struct
 #define MSG_TYPE_READY_FAILED   "failed to finalize new type object"
 #define MSG_TYPE_ADD_FAILED     "failed to add new type object to module"
 
-#define MSG_PROB_NOT_STARTED    "cannot probe a sandbox that is not started"
+#define MSG_PROBE_NOT_STARTED   "cannot probe a sandbox that is not started"
 
 #define MSG_DUMP_NOT_BLOCKED    "cannot dump a sandbox unless it is blocked"
-#define MSG_DUMP_PROB_FAILED    "failed to probe the sandbox"
+#define MSG_DUMP_PROBE_FAILED   "failed to probe the sandbox"
 #define MSG_DUMP_DUMP_FAILED    "failed to dump the sandbox"
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
 
 #endif /* __OJS_MODULE_H__ */

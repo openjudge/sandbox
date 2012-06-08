@@ -1,10 +1,11 @@
 INTRODUCTION
+ 
+  The sandbox libraries (libsandbox & pysandbox) provide API's in C/C++ and
+  Python for executing and profiling simple (single process) programs in a 
+  restricted environment, or sandbox. Runtime behaviours of binary executable 
+  programs can be captured and blocked according to configurable/programmable 
+  policies.
   
-  The sandbox libraries (libsandbox & pysandbox) provide API's in C/C++/Python 
-  for executing simple (single process) programs in a restricted environment, or
-  sandbox. Runtime behaviours of binary executable programs can be captured and 
-  blocked according to configurable / programmable policies.
-
   The sandbox libraries are distributed under the terms of the New BSD license, 
   please refer to the plain text file named COPYING in individual packages.
   
@@ -28,8 +29,7 @@ INSTALLATION
   
   binary package (Ubuntu)
   
-  $ sudo apt-get install rpm
-  $ rpm -Uvh --nodeps pysandbox-<version>.<platform>.rpm
+  $ dpkg -i pysandbox_<version>_<platform>.deb
   
   source package
   

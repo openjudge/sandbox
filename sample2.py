@@ -2,7 +2,7 @@
 ################################################################################
 # Sandbox Libraries (Python) - Sample Script                                   #
 #                                                                              #
-# Copyright (C) 2009-2011 LIU Yu, <pineapple.liu@gmail.com>                    #
+# Copyright (C) 2009-2012 LIU Yu, <pineapple.liu@gmail.com>                    #
 # All rights reserved.                                                         #
 #                                                                              #
 # Redistribution and use in source and binary forms, with or without           #
@@ -48,14 +48,14 @@ try:
 except ImportError:
     sys.stderr.write("Required package(s) missing.\n")
     sys.exit(os.EX_UNAVAILABLE)
-except AssertionError, e:
+except AssertionError as e:
     sys.stderr.write(str(e))
     sys.exit(os.EX_UNAVAILABLE)
 
 # result code translation
 def result_name(r):
     return ('PD', 'OK', 'RF', 'ML', 'OL', 'TL', 'RT', 'AT', 'IE', 'BP')[r] \
-        if r in xrange(10) else None
+        if r in range(10) else None
 
 def main(args):
     # sandbox configuration

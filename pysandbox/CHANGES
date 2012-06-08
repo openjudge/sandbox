@@ -1,3 +1,23 @@
+[2012/06/08] LIU Yu, <pineapple.liu@gmail.com>
+  * done with py3k compatibility
+
+[2012/06/03] LIU Yu, <pineapple.liu@gmail.com>
+  * refactored code and compile args for C++ compatibility
+  * refactored code for py3k compatibility
+  * removed support for str()/unicode() quota values
+
+[2012/04/25] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.c moved inline help messages to sandbox/module.h
+  * wrapped sandbox/module.{h,c} with extern "C" for C++ compatibility
+  * in sandbox/module.h include <Python.h> before standard headers to suppress
+    warnings on _POSIX_C_SOURCE redefinition
+
+[2012/04/22] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.h removed bool definition and in sandbox/module.c added 
+    <sandbox-dev.h> inclusion
+  * in sandbox/module.c revised affiliated code for py3k forward compatibility
+  * in setup.{py,cfg} updated version to 0.3.4-1
+
 [2012/04/03] LIU Yu, <pineapple.liu@gmail.com>
   * in setup.{py,cfg} updated version to 0.3.3-rc5
 
@@ -120,7 +140,7 @@
   * in sandbox/__init__.py and setup.{py,cfg} update version to 0.1.8a-2
   * in sandbox/module.c renamed `ex?' members of SandboxEvent to `ext?'
   * in sandbox/module.c added a new `dump' method to Sandbox for obtaining
-    data from the memory space of targeted program
+    data from the memory space of the prisoner process
   * in sandbox/module.c added datatype constants T_{BYTE,SHORT,INT,LONG},
     T_{UBYTE,USHORT,UINT,ULONG} T_{FLOAT,DOUBLE,CHAR,STRING} to the dict 
     of SandboxType

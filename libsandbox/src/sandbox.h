@@ -35,10 +35,9 @@
 #ifndef __OJS_SANDBOX_H__
 #define __OJS_SANDBOX_H__
 
-#include <stdio.h>              /* fprintf(), fflush(), stderr */
-#include <errno.h>              /* errno, strerror() */
-#include <limits.h>             /* ARG_MAX, PATH_MAX */
-#include <pthread.h>            /* pthread_mutex_{lock,unlock}() */
+#include <limits.h>             /* PATH_MAX */
+#include <pthread.h>            /* pthread_mutex_t, pthread_cond_t */
+#include <stdbool.h>            /* false, true */
 #include <sys/resource.h>       /* rlim_t, RLIM_INFINITY */
 #include <sys/types.h>          /* uid_t, gid_t */
 #include <time.h>               /* struct timespec */
@@ -48,97 +47,57 @@ extern "C"
 {
 #endif
 
-#ifndef DBG
-#ifdef NDEBUG
-#define DBG(fmt,x...) ((void)0)
+#ifndef FILENO_MAX
+#define FILENO_MAX 256
+#endif /* FILENO_MAX */
+
+#ifndef SBOX_ARG_MAX
+#if defined(ARG_MAX) && (ARG_MAX > 65536)
+#define SBOX_ARG_MAX ARG_MAX
+#warning "overriding default value of SBOX_ARG_MAX"
 #else
-#ifndef DBG_PREFIX
-#define DBG_PREFIX "debug>"
-#endif /* DBG_PREFIX */
-#define DBG(fmt,x...) \
-{{{ \
-    fprintf(stderr, DBG_PREFIX fmt "\n", ##x); \
-    fflush(stderr); \
-}}}
-#endif /* NDEBUG */
-#endif /* DBG */
+#define SBOX_ARG_MAX 65536
+#endif
+#endif /* SBOX_ARG_MAX */
 
-#ifndef WARNING
-#ifdef NDEBUG
-#define WARNING(fmt,x...) ((void)0)
+#ifndef SBOX_PATH_MAX
+#if defined(PATH_MAX) && (PATH_MAX > 4096)
+#define SBOX_PATH_MAX PATH_MAX
+#warning "overriding default value of SBOX_PATH_MAX"
 #else
-#ifndef WARN_PREFIX
-#define WARN_PREFIX "warning>"
-#endif /* WARN_PREFIX */
-#define WARNING(fmt,x...) \
-{{{ \
-    fprintf(stderr, WARN_PREFIX fmt, ##x); \
-    if (errno != 0) \
-    { \
-        fprintf(stderr, ": %s", strerror(errno)); \
-    } \
-    fprintf(stderr, "\n"); \
-    fflush(stderr); \
-}}}
-#endif /* NDEBUG */
-#endif /* WARNING */
+#define SBOX_PATH_MAX 4096
+#endif
+#endif /* SBOX_PATH_MAX */
 
-#ifndef FUNC_BEGIN
-#define FUNC_BEGIN(fmt,x...) \
-{{{ \
-    DBG("calling: %s(" fmt ")", __FUNCTION__, ##x); \
-}}}
-#endif /* FUNC_BEGIN */
+#ifndef SBOX_QUOTA_INF
+#define SBOX_QUOTA_INF RLIM_INFINITY
+#endif /* SBOX_RES_INF */
 
-#ifndef FUNC_RET
-#define FUNC_RET(fmt,r) \
-{{{ \
-    DBG("leaving: %s() = " fmt, __FUNCTION__, (r)); \
-    return (r); \
-}}}
-#endif /* FUNC_RET */
+#ifndef RES_INFINITY
+#define RES_INFINITY SBOX_QUOTA_INF
+#endif /* RES_INFINITY */
 
-#ifndef PROC_BEGIN
-#define PROC_BEGIN FUNC_BEGIN
-#endif /* PROC_BEGIN */
+/* Maximum number of monitor threads */
+#ifndef SBOX_MONITOR_MAX
+#define SBOX_MONITOR_MAX 8
+#else
+#warning "overriding default monitor pool size"
+#endif /* SBOX_MONITOR_MAX */
 
-#ifndef PROC_END
-#define PROC_END(void) \
-{{{ \
-    DBG("leaving: %s()", __FUNCTION__); \
-    return; \
-}}}
-#endif /* PROC_END */
-
-#ifndef __cplusplus
-#ifndef HAVE_BOOL
-#define HAVE_BOOL
-/** 
- * @brief Emulation of the C++ bool type. 
- */
-typedef enum 
-{
-    false,                      /*!< false */
-    true                        /*!< true */
-} bool;
-#endif /* HAVE_BOOL */
-#endif /* __cplusplus */
-
-#ifndef ARG_MAX
-#define ARG_MAX 65536
-#endif /* ARG_MAX */
-
-#ifndef PATH_MAX
-#define PATH_MAX 4096
-#endif /* PATH_MAX */
+/* Maximum number of queued events */
+#ifndef SBOX_EVENT_MAX
+#define SBOX_EVENT_MAX 32
+#else
+#warning "overriding default event queue size"
+#endif /* SBOX_EVENT_MAX */
 
 /**
  * @brief Serialized representation of a command and its arguments.
  */
 typedef struct
 {
-    char buff[ARG_MAX];         /**< command line buffer */
-    int args[ARG_MAX];          /**< arguments offset */
+    char buff[SBOX_ARG_MAX];    /**< command line buffer */
+    int args[SBOX_ARG_MAX];     /**< arguments offset */
 } command_t;
 
 /** 
@@ -159,17 +118,13 @@ typedef enum
  */
 typedef rlim_t res_t;
 
-#ifndef RES_INFINITY
-#define RES_INFINITY RLIM_INFINITY
-#endif /* RES_INFINITY */
-
 /** 
  * @brief Static specification of a task.
  */
 typedef struct
 {
     command_t comm;             /**< command (with arguments) to be executed */
-    char jail[PATH_MAX];        /**< chroot to this path before running cmd */ 
+    char jail[SBOX_PATH_MAX];   /**< chroot to this path before running cmd */ 
     uid_t uid;                  /**< run command as this user */
     gid_t gid;                  /**< run command as member of this group */
     int ifd;                    /**< file descriptor for task input */
@@ -408,20 +363,6 @@ typedef void (* policy_entry_t)(const policy_t *, const event_t *, action_t *);
 typedef void * (* thread_func_t)(void *);
 #endif /* thread_func_t */
 
-/* Maximum number of monitor threads */
-#ifndef SBOX_MONITOR_MAX
-#define SBOX_MONITOR_MAX 8
-#else
-#warning "overriding default monitor pool size"
-#endif /* SBOX_MONITOR_MAX */
-
-/* Maximum number of queued events */
-#ifndef SBOX_EVENT_MAX
-#define SBOX_EVENT_MAX 32
-#else
-#warning "overriding default event queue size"
-#endif /* SBOX_EVENT_MAX */
-
 /** 
  * @brief Configurable controller of a sandbox object.
  */
@@ -443,27 +384,6 @@ typedef struct
     } event;                    /**< the queue of pending events */
 } ctrl_t;
 
-/* Macros for mutex manipulation */
-#ifndef P
-#define P(pm) \
-{{{ \
-    if (pthread_mutex_lock((pm)) != 0) \
-    { \
-        WARNING("mutex lock failed"); \
-    } \
-}}}
-#endif /* P */
-
-#ifndef V
-#define V(pm) \
-{{{ \
-    if (pthread_mutex_unlock((pm)) != 0) \
-    { \
-        WARNING("mutex unlock failed"); \
-    } \
-}}}
-#endif /* V */
-
 /** 
  * @brief Structure for collecting everything needed to run a sandbox. 
  */
@@ -477,31 +397,6 @@ typedef struct
     stat_t stat;                /**< task cumulative statistics */
     ctrl_t ctrl;                /**< configurable sandbox controller */
 } sandbox_t;
-
-#ifndef NOT_STARTED
-#define NOT_STARTED(psbox) \
-    ((((psbox)->status) == S_STATUS_RDY) || (((psbox)->status) == S_STATUS_PRE))
-#endif /* NOT_STARTED */
-
-#ifndef IS_RUNNING
-#define IS_RUNNING(psbox) \
-    (((psbox)->status) == S_STATUS_EXE)
-#endif /* IS_RUNNING */
-
-#ifndef IS_BLOCKED
-#define IS_BLOCKED(psbox) \
-    (((psbox)->status) == S_STATUS_BLK)
-#endif /* IS_BLOCKED */
-
-#ifndef IS_FINISHED
-#define IS_FINISHED(psbox) \
-    (((psbox)->status) == S_STATUS_FIN)
-#endif /* IS_FINISHED */
-
-#ifndef HAS_RESULT
-#define HAS_RESULT(psbox) \
-    (((psbox)->result) != S_RESULT_PD)
-#endif /* HAS_RESULT */
 
 /** 
  * @brief Initialize a \c sandbox_t object.
@@ -549,3 +444,4 @@ void sandbox_default_policy(const policy_t * ppolicy, const event_t * pevent,
 #endif
 
 #endif /* __OJS_SANDBOX_H__ */
+

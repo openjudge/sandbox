@@ -31,8 +31,8 @@
 # POSSIBILITY OF SUCH DAMAGE.                                                  #
 ################################################################################
 %define name libsandbox
-%define version 0.3.3
-%define release rc5
+%define version 0.3.4
+%define release 1
 
 Summary: The Sandbox Libraries
 Name: %{name}
@@ -47,7 +47,7 @@ Vendor: OpenJudge Alliance, http://openjudge.net
 Packager: LIU Yu <pineapple.liu@gmail.com>
 Url: http://sourceforge.net/projects/libsandbox
 
-Provides: sandbox.h
+Provides: sandbox.h sandbox-dev.h
 %ifarch x86_64
 Provides: libsandbox.so()(64bit)
 %else
@@ -78,6 +78,7 @@ rmdir --ignore-fail-on-non-empty %{buildroot}
 %files
 %defattr(-,root,root)
 %{_includedir}/sandbox.h
+%{_includedir}/sandbox-dev.h
 %{_libdir}/%{name}.so.%{version}
 %{_libdir}/%{name}.so
 %{_libdir}/%{name}.a

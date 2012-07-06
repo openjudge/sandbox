@@ -43,7 +43,7 @@ from os.path import join, basename
 
 NAME = 'pysandbox'
 VERSION = "0.3.4"
-RELEASE = "1"
+RELEASE = "2"
 AUTHOR = "LIU Yu"
 AUTHOR_EMAIL = "pineapple.liu@gmail.com"
 MAINTAINER = AUTHOR

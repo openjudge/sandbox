@@ -60,7 +60,8 @@ extern "C"
 #define __WORDSIZE              64
 #endif /* __WORDSIZE */
 #define MAKE_WORD(a,b) \
-    ((long)(((int)(a)) | (((long)((int)(b))) << 32))) \
+    ((unsigned long)((((unsigned long)((unsigned int)(b))) << 32) | \
+                     ((unsigned int)(a)))) \
 /* MAKE_WORD */
 #define OPCODE16(op) \
     ((unsigned long)(op) & (~((unsigned long)(~0LU << 16)))) \
@@ -78,7 +79,8 @@ extern "C"
 #define __WORDSIZE              32
 #endif /* __WORDSIZE */
 #define MAKE_WORD(a,b) \
-    ((long)(((short)(a)) | (((long)((short)(b))) << 16))) \
+    ((unsigned long)((((unsigned long)((unsigned short)(b))) << 16) | \
+                     ((unsigned short)(a)))) \
 /* MAKE_WORD */
 #define OPCODE16(op) \
     ((unsigned long)(op) & (~((unsigned long)(~0LU << 16)))) \

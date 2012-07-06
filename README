@@ -49,7 +49,10 @@ INSTALLATION
   $ sudo python setup.py install
 
 GETTING STARTED
-
+  
+  The simplest way to get started with the sandbox libraries is to invoke the 
+  Pythonic wrapper (aka. pysandbox) through the interactive Python interpreter.
+  
   $ python
   >>> from sandbox import *
   >>> s = Sandbox(['/foo/bar.exe', 'arg1', 'arg2'])
@@ -57,6 +60,12 @@ GETTING STARTED
   ...
   >>> s.probe()
   ...
+  
+  For a more elaborate example, refer to the sample Python script sample2.py. It 
+  demonstrates essential functionalities of pysandbox including I/O redirection, 
+  resource quota limitation, and white-list system call interception.
+  
+  $ python sample2.py
 
 SPECIAL NOTICES
   

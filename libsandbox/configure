@@ -611,6 +611,9 @@ CPPFLAGS
 LDFLAGS
 CFLAGS
 CC
+PACKAGE_CONFIG
+PACKAGE_DESCR
+PACKAGE_BRIEF
 PACKAGE_RELEASE
 target_alias
 host_alias
@@ -2129,7 +2132,14 @@ ac_link='$CC -o conftest$ac_exeext $CFLAGS $CPPFLAGS $LDFLAGS conftest.$ac_ext $
 ac_compiler_gnu=$ac_cv_c_compiler_gnu
 
 
-PACKAGE_RELEASE="1"
+PACKAGE_RELEASE="2"
+
+PACKAGE_BRIEF="The Sandbox Libraries"
+
+PACKAGE_DESCR="The sandbox libraries (libsandbox & pysandbox) provide API's in C/C++/Python
+for executing simple (single process) programs in a restricted environment, or
+sandbox. Runtime behaviours of binary executable programs can be captured and
+blocked according to configurable / programmable policies."
 
 
 
@@ -2138,6 +2148,9 @@ ac_config_headers="$ac_config_headers src/config.h"
 
 
 # Checks for optional features.
+PACKAGE_CONFIG=""
+
+
 with_debug=no
 with_cachesz=no
 with_tsc=no
@@ -2173,22 +2186,31 @@ fi
 # Compose CFLAGS.
 CFLAGS="-Wall -g0 -O3 -ansi -std=gnu99 -fPIC -pthread -Isrc -D SANDBOX $CFLAGS"
 
-if test "x$with_debug" == xyes; then :
-  CFLAGS="$CFLAGS -D DEBUG -U NDEBUG"
+if test "x$with_debug" == xyes; then
+    CFLAGS="$CFLAGS -D DEBUG -U NDEBUG"
+    PACKAGE_CONFIG="$PACKAGE_CONFIG --enable-debug"
 else
-  CFLAGS="$CFLAGS -D NDEBUG -U DEBUG"
+    CFLAGS="$CFLAGS -D NDEBUG -U DEBUG"
 fi
-if test "x$with_cachesz" == xyes; then :
-  CFLAGS="$CFLAGS -D CACHE_SIZE=$enable_cachesz"
+
+if test "x$with_chkvsc" == xyes; then
+    CFLAGS="$CFLAGS -D WITH_VSYSCALL_INSPECT"
+    PACKAGE_CONFIG="$PACKAGE_CONFIG --enable-chkvsc"
 fi
-if test "x$with_tsc" == xyes; then :
-  CFLAGS="$CFLAGS -D WITH_SOFTWARE_TSC"
+
+if test "x$with_cachesz" == xyes; then
+    CFLAGS="$CFLAGS -D CACHE_SIZE=$enable_cachesz"
+    PACKAGE_CONFIG="$PACKAGE_CONFIG --enable-cachesz=$enable_cachesz"
 fi
-if test "x$with_chkvsc" == xyes; then :
-  CFLAGS="$CFLAGS -D WITH_VSYSCALL_INSPECT"
+
+if test "x$with_tsc" == xyes; then
+    CFLAGS="$CFLAGS -D WITH_SOFTWARE_TSC"
+    PACKAGE_CONFIG="$PACKAGE_CONFIG --enable-tsc"
 fi
-if test "x$with_rtsched" == xyes; then :
-  CFLAGS="$CFLAGS -D WITH_REALTIME_SCHED"
+
+if test "x$with_rtsched" == xyes; then
+    CFLAGS="$CFLAGS -D WITH_REALTIME_SCHED"
+    PACKAGE_CONFIG="$PACKAGE_CONFIG --enable-rtsched"
 fi
 
 # Checks for procfs.
@@ -4163,7 +4185,18 @@ fi
 done
 
 
-ac_config_files="$ac_config_files Makefile"
+ac_config_files="$ac_config_files Makefile Doxyfile"
+
+
+if test -e sandbox.spec.in; then
+    ac_config_files="$ac_config_files sandbox.spec"
+
+fi
+
+if test -e sandbox.pc.in; then
+    ac_config_files="$ac_config_files sandbox.pc"
+
+fi
 
 cat >confcache <<\_ACEOF
 # This file is a shell script that caches the results of configure
@@ -4860,6 +4893,9 @@ do
   case $ac_config_target in
     "src/config.h") CONFIG_HEADERS="$CONFIG_HEADERS src/config.h" ;;
     "Makefile") CONFIG_FILES="$CONFIG_FILES Makefile" ;;
+    "Doxyfile") CONFIG_FILES="$CONFIG_FILES Doxyfile" ;;
+    "sandbox.spec") CONFIG_FILES="$CONFIG_FILES sandbox.spec" ;;
+    "sandbox.pc") CONFIG_FILES="$CONFIG_FILES sandbox.pc" ;;
 
   *) as_fn_error $? "invalid argument: \`$ac_config_target'" "$LINENO" 5 ;;
   esac
@@ -5448,4 +5484,5 @@ if test -n "$ac_unrecognized_opts" && test "$enable_option_checking" != no; then
   { $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: unrecognized options: $ac_unrecognized_opts" >&5
 $as_echo "$as_me: WARNING: unrecognized options: $ac_unrecognized_opts" >&2;}
 fi
+
 

@@ -59,8 +59,8 @@ $(LIBRARY)_src = src/platform.c src/sandbox.c src/internal.c
 $(LIBRARY)_obj = $($(LIBRARY)_src:.c=.@OBJEXT@)
 $(LIBRARY)_sdist = $($(LIBRARY)_hdr:config.h=config.h.in) \
                    $($(LIBRARY)_src:internal.c=internal.awk) \
-                   $(LIBRARY).spec Makefile.in Doxyfile configure install-sh \
-                   README COPYING CHANGES
+                   $(LIBRARY).spec $(LIBRARY).pc Makefile.in Doxyfile.in \
+                   configure install-sh README COPYING CHANGES
 $(LIBRARY)_bdist = lib$(LIBRARY).so lib$(LIBRARY).so.$(VERSION) lib$(LIBRARY).a
 
 # build branches
@@ -83,7 +83,7 @@ $(prefix) dist:
 	$(MKDIR) $(@)
 
 clean:
-	rm -f src/internal.c src/config.h config.log config.status Makefile
+	rm -f src/internal.c src/config.h config.log config.status Makefile Doxyfile
 	rm -f $($(LIBRARY)_obj) $($(LIBRARY)_bdist)
 
 sdist: dist $($(LIBRARY)_sdist)
@@ -97,14 +97,15 @@ sdist: dist $($(LIBRARY)_sdist)
 install: $(prefix) $($(LIBRARY)_bdist) src/$(LIBRARY).h
 	$(INSTALL_DATA) src/$(LIBRARY).h $(includedir)/$(LIBRARY).h
 	$(INSTALL_DATA) src/internal.h $(includedir)/$(LIBRARY)-dev.h
+	$(INSTALL_DATA) $(LIBRARY).pc $(libdir)/pkgconfig/lib$(LIBRARY).pc
 	$(INSTALL_DATA) lib$(LIBRARY).a $(libdir)/lib$(LIBRARY).a
 	$(INSTALL) lib$(LIBRARY).so.$(VERSION) $(libdir)/lib$(LIBRARY).so.$(VERSION)
 	$(LN) lib$(LIBRARY).so.$(VERSION) $(libdir)/lib$(LIBRARY).so
 
-Makefile: Makefile.in
+Makefile: Makefile.in config.status
 	./config.status
 
-src/config.h: src/config.h.in
+src/config.h: src/config.h.in config.status
 	./config.status
 
 config.status: configure

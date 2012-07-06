@@ -1,3 +1,11 @@
+[2012/07/04] LIU Yu, <pineapple.liu@gmail.com>
+  * added sandbox.pc.in as pkgconfig file template
+  * added sandbox.spec.in as rpm specification template
+  * merged descriptive texts and version numbers to configure.in
+  * in platform.h fixed integer overflow in argument extraction
+  * in configure.in propagate config options to sandbox.spec
+  * in configure.in updated version to 0.3.4-2
+
 [2012/04/22] LIU Yu, <pineapple.liu@gmail.com>
   * renamed symbols.{h,c,awk} -> internal.{h,c,awk} and moved some internal
     directives from sandbox.h to internal.h

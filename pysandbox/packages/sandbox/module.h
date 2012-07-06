@@ -44,6 +44,10 @@
 #include <Python.h>
 #include <structmember.h>
 
+#if PY_MAJOR_VERSION >= 3
+#define IS_PY3K 1
+#endif
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -116,18 +120,22 @@ typedef struct
 
 /* Error messages */
 
+#ifdef IS_PY3K
+#define MSG_STR_OBJ             "bytes or string object"
+#else
+#define MSG_STR_OBJ             "string or unicode object"
+#endif
 #define MSG_STR_OR_SEQ          "string or sequence of strings"
+#define MSG_STR_TYPE_ERR        "expect a " MSG_STR_OBJ
 
-#define MSG_STR_TYPE_ERR        "should be a string or unicode"
-
-#define MSG_ARGS_TOO_LONG       "command line too long"
+#define MSG_ARGS_TOO_LONG       "command line is too long"
 #define MSG_ARGS_TYPE_ERR       "command line should be a " MSG_STR_OR_SEQ
 #define MSG_ARGS_VAL_ERR        "command line should be a " MSG_STR_OR_SEQ
 #define MSG_ARGS_INVALID        "command line should contain full path to an " \
                                 "executable"
 
-#define MSG_JAIL_TOO_LONG       "program jail too long"
-#define MSG_JAIL_TYPE_ERR       "program jail should be a string or unicode"
+#define MSG_JAIL_TOO_LONG       "program jail is too long"
+#define MSG_JAIL_TYPE_ERR       "program jail should be a " MSG_STR_OBJ
 #define MSG_JAIL_INVALID        "program jail should be a valid path"
 #define MSG_JAIL_NOPERM         "only super-user can chroot"
 
@@ -151,12 +159,12 @@ typedef struct
 #define MSG_QUOTA_TYPE_ERR      "quota should be a list or dictionary of " \
                                 "integers"
 #define MSG_QUOTA_VAL_ERR       "quota value is invalid"
-#define MSG_QUOTA_INVALID       "failed accessing element from quota list"
+#define MSG_QUOTA_INVALID       "failed to access elements in quota list"
 
 #define MSG_POLICY_TYPE_ERR     "policy should be a callable object"
 #define MSG_POLICY_CALL_FAILED  "policy failed to determine action"
 
-#define MSG_NO_IMPL             "this method is not implemented"
+#define MSG_NO_IMPL             "method is not implemented"
 
 #define MSG_ATTR_ADD_FAILED     "failed to add new attribute to module"
 #define MSG_ALLOC_FAILED        "failed to allocate new object"

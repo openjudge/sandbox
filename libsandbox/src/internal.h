@@ -38,10 +38,10 @@
 #include <sandbox.h>
 
 #include <assert.h>             /* assert() */
-#include <stdio.h>              /* fprintf(), fflush(), stderr */
-#include <signal.h>             /* kill(), SIG* */
 #include <errno.h>              /* errno, strerror() */
 #include <pthread.h>            /* pthread_mutex_{lock,unlock}() */
+#include <signal.h>             /* kill(), SIG* */
+#include <stdio.h>              /* fprintf(), fflush(), stderr */
 #include <time.h>               /* struct timespec */
 
 #ifdef __cplusplus
@@ -238,10 +238,10 @@ const char * s_status_name(int status);
 const char * s_result_name(int result);
 
 /**
- * @param[in] action any of the constant values defined in \c trace_action_t
- * @return a statically allocated string name for the specified action.
+ * @param[in] option any of the constant values defined in \c option_t
+ * @return a statically allocated string name for the specified option.
  */
-const char * t_option_name(int action);
+const char * t_option_name(int option);
 
 #ifdef __cplusplus
 } /* extern "C" */

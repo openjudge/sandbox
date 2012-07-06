@@ -1,3 +1,6 @@
+[2012/07/04] LIU Yu, <pineapple.liu@gmail.com>
+  * in setup.{py,cfg} updated version to 0.3.4-2
+
 [2012/06/08] LIU Yu, <pineapple.liu@gmail.com>
   * done with py3k compatibility
 

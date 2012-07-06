@@ -35,10 +35,6 @@
 #include <pwd.h>               /* struct passwd, getpwnam(), getpwuid() */
 #include <grp.h>               /* struct group, getgrnam(), getgrgid() */
 
-#if PY_MAJOR_VERSION >= 3
-#define IS_PY3K 1
-#endif
-
 #ifdef __cplusplus
 extern "C"
 {
@@ -1207,7 +1203,7 @@ Sandbox_init_efd(PyObject * o, int * pefd)
 }
 
 static res_t
-SandboxQuota_FromPyObject(PyObject * o)
+SandboxQuota_FromObject(PyObject * o)
 {
     FUNC_BEGIN("%p", o);
     
@@ -1269,7 +1265,7 @@ Sandbox_init_qta(PyObject * o, res_t * pqta)
                 quota[t] = RES_INFINITY;
                 continue;
             }
-            quota[t] = SandboxQuota_FromPyObject(value);
+            quota[t] = SandboxQuota_FromObject(value);
         }
     }
     else if (PySequence_Check(o))
@@ -1287,7 +1283,7 @@ Sandbox_init_qta(PyObject * o, res_t * pqta)
                 PyErr_SetString(PyExc_IndexError, MSG_QUOTA_INVALID);
                 break;
             }
-            quota[t] = SandboxQuota_FromPyObject(value);
+            quota[t] = SandboxQuota_FromObject(value);
         }
     }
     else

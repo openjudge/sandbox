@@ -1,5 +1,5 @@
 ################################################################################
-# The Sandbox Libraries RPM Specification                                      #
+# The Sandbox Libraries pkg-config File                                        #
 #                                                                              #
 # Copyright (C) 2004-2009, 2011, 2012 LIU Yu, pineapple.liu@gmail.com          #
 # All rights reserved.                                                         #
@@ -31,57 +31,17 @@
 # POSSIBILITY OF SUCH DAMAGE.                                                  #
 ################################################################################
 
-%define sbox sandbox
-%define name lib%{sbox}
-%define version 0.3.4
-%define release 2
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+modules=1
 
-Summary: The Sandbox Libraries
-Name: %{name}
-Version: %{version}
-Release: %{release}
-Source0: %{name}-%{version}.tar.gz
-License: BSD License
-Group: Development/Libraries
-BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-buildroot
-Prefix: %{_prefix}
-Vendor: OpenJudge Alliance, http://openjudge.net
-Packager: LIU Yu <pineapple.liu@gmail.com>
-Url: http://sourceforge.net/projects/libsandbox
+Name: libsandbox
+Version: 0.3.4
+Description: The Sandbox Libraries
+Requires:
+Libs: -L${libdir} -lsandbox
+Libs.private: -lpthread -lrt
+Cflags: -pthread -I${includedir}
 
-Provides: %{sbox}.h %{sbox}-dev.h
-%ifarch x86_64
-Provides: %{name}.so()(64bit)
-%else
-Provides: %{name}.so
-%endif
-
-%description
-The sandbox libraries (libsandbox & pysandbox) provide API's in C/C++/Python
-for executing simple (single process) programs in a restricted environment, or
-sandbox. Runtime behaviours of binary executable programs can be captured and
-blocked according to configurable / programmable policies.
-
-%prep
-%setup
-./configure --prefix=%{buildroot}%{_prefix} --libdir=%{buildroot}%{_libdir} --includedir=%{buildroot}%{_includedir}  --enable-chkvsc
-
-%build
-make
-
-%install
-make prefix=%{buildroot}%{_prefix} install
-
-%clean
-rm -rf %{buildroot}%{_prefix}
-rmdir --ignore-fail-on-non-empty %{buildroot}
-
-%files
-%defattr(-,root,root)
-%{_includedir}/%{sbox}.h
-%{_includedir}/%{sbox}-dev.h
-%{_libdir}/pkgconfig/%{name}.pc
-%{_libdir}/%{name}.so.%{version}
-%{_libdir}/%{name}.so
-%{_libdir}/%{name}.a
-%doc README COPYING CHANGES

@@ -2,9 +2,10 @@ INTRODUCTION
   
   The sandbox libraries (libsandbox & pysandbox) provide API's in C/C++ and
   Python for executing and profiling simple (single process) programs in a 
-  restricted environment, or sandbox. Runtime behaviours of binary executable 
-  programs can be captured and blocked according to configurable/programmable   
-  policies.
+  restricted environment, or sandbox. These API's can help developers to build
+  automated profiling tools and watchdogs that capture and block the runtime 
+  behaviours of binary executable programs according to configurable / 
+  programmable policies.
   
   The sandbox libraries are distributed under the terms of the New BSD license, 
   please refer to the plain text file named COPYING in individual packages.

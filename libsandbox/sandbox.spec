@@ -34,7 +34,7 @@
 %define sbox sandbox
 %define name lib%{sbox}
 %define version 0.3.4
-%define release 2
+%define release 3
 
 Summary: The Sandbox Libraries
 Name: %{name}

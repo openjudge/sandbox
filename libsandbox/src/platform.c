@@ -189,13 +189,11 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
             sscanf(token, "%lu", &pproc->minflt);
             break;
         case 10:                /* cmin_flt */
-            sscanf(token, "%lu", &pproc->cminflt);
             break;
         case 11:                /* maj_flt */
             sscanf(token, "%lu", &pproc->majflt);
             break;
         case 12:                /* cmaj_flt */
-            sscanf(token, "%lu", &pproc->cmajflt);
             break;
         case 13:                /* utime */
             sscanf(token, "%lu", &tm.tms_utime);
@@ -204,11 +202,7 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
             sscanf(token, "%lu", &tm.tms_stime);
             break;
         case 15:                /* cutime */
-            sscanf(token, "%ld", &tm.tms_cutime);
-            break;
         case 16:                /* cstime */
-            sscanf(token, "%ld", &tm.tms_cstime);
-            break;
         case 17:                /* priority */
         case 18:                /* nice */
         case 19:                /* num_threads (since 2.6 kernel) */
@@ -259,8 +253,6 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
     
     TS_UPDATE_CLK(&pproc->utime, tm.tms_utime);
     TS_UPDATE_CLK(&pproc->stime, tm.tms_stime);
-    TS_UPDATE_CLK(&pproc->cutime, tm.tms_cutime);
-    TS_UPDATE_CLK(&pproc->cstime, tm.tms_cstime);
     
     DBUG("proc.pid                    % 10d", pproc->pid);
     DBUG("proc.ppid                   % 10d", pproc->ppid);
@@ -268,12 +260,8 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
     DBUG("proc.flags          0x%016lx", pproc->flags);
     DBUG("proc.utime                  %010lu", ts2ms(pproc->utime));
     DBUG("proc.stime                  %010lu", ts2ms(pproc->stime));
-    DBUG("proc.cutime                 % 10ld", ts2ms(pproc->cutime));
-    DBUG("proc.cstime                 % 10ld", ts2ms(pproc->cstime));
     DBUG("proc.minflt                 %010lu", pproc->minflt);
-    DBUG("proc.cminflt                %010lu", pproc->cminflt);
     DBUG("proc.majflt                 %010lu", pproc->majflt);
-    DBUG("proc.cmajflt                %010lu", pproc->cmajflt);
     DBUG("proc.vsize                  %010lu", pproc->vsize);
     DBUG("proc.rss                    % 10ld", pproc->rss);
     

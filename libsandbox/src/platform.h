@@ -116,13 +116,9 @@ typedef struct
     char state;                 /**< state of the process */
     unsigned long flags;        /**< unknown */
     struct timespec utime;      /**< cpu usage (sec + nanosec) */
-    struct timespec cutime;     /**< child cpu usage (sec + nanosec) */
     struct timespec stime;      /**< sys cpu usage (sec + nanosec) */
-    struct timespec cstime;     /**< child sys cpu usage (sec + nanosec) */
     unsigned long minflt;       /**< minor page faults (# of pages) */
-    unsigned long cminflt;      /**< minor page faults of children */
     unsigned long majflt;       /**< major page faults (# of pages) */
-    unsigned long cmajflt;      /**< major page faults of children */
     unsigned long vsize;        /**< virtual memory size (bytes) */
     long rss;                   /**< resident set size (pages) */
 #ifdef __linux__

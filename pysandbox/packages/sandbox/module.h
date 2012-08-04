@@ -45,87 +45,99 @@
 #include <structmember.h>
 
 #if PY_MAJOR_VERSION >= 3
-#define IS_PY3K 1
+#define PY3K
+#else
+#undef  PY3K
 #endif
+
+#ifndef PyDoc_STR
+#define PyDoc_VAR(name)                 static char name[]
+#define PyDoc_STR(doc)                  (doc)
+#define PyDoc_STRVAR(name, doc)         PyDoc_VAR(name) = PyDoc_STR(doc)
+#endif /* PyDoc_STR */
+
+#ifndef Py_NULL
+#define Py_NULL                         ((PyObject *)NULL)
+#endif /* Py_NULL */
 
 #ifdef __cplusplus
 extern "C"
 {
 #endif
 
-typedef struct 
+/* Native structures */
+
+typedef struct
 {
     PyObject_HEAD
-    event_t raw;
+    union
+    {
+        event_t event;
+        action_t action;
+        struct
+        {
+            PyObject * e;
+            PyObject * a;
+        } policy;
+    } raw;
+} Any;
+
+#define Any_AS_EVENT(o)                 (((Any *)(o))->raw.event)
+#define Any_AS_ACTION(o)                (((Any *)(o))->raw.action)
+#define Any_AS_POLICY(o)                (((Any *)(o))->raw.policy)
+
+typedef struct 
+{
+    Any head;
 } SandboxEvent;
 
+#define SandboxEvent_GET_EVENT(o)       Any_AS_EVENT((Any *)(o))
+
 typedef struct 
 {
-    PyObject_HEAD
-    action_t raw;
+    Any head;
 } SandboxAction;
 
+#define SandboxAction_GET_ACTION(o)     Any_AS_ACTION((Any *)(o))
+
 typedef struct 
 {
-    PyObject_HEAD
+    Any head;
 } SandboxPolicy;
 
+#define SandboxPolicy_GET_STATE(o)      Any_AS_POLICY((Any *)(o))
+
 typedef struct 
 {
-    PyObject_HEAD
+    Any head;
     sandbox_t sbox;
+    struct
+    {
+        PyObject * i;
+        PyObject * o;
+        PyObject * e;
+    } io;
 } Sandbox;
 
-/* Inline help messages */
+#define Sandbox_GET_SBOX(o)             (((Sandbox *)(o))->sbox)
+#define Sandbox_GET_IO(o)               (((Sandbox *)(o))->io)
 
-#ifndef DOC_TP_EVENT
-#define DOC_TP_EVENT            0
-#endif /* DOC_TP_EVENT */
+/* Messages */
 
-#ifndef DOC_TP_ACTION
-#define DOC_TP_ACTION           0
-#endif /* DOC_TP_ACTION */
+#ifdef PY3K
 
-#ifndef DOC_TP_POLICY
-#define DOC_TP_POLICY           0
-#endif /* DOC_TP_POLICY */
+#define MSG_LONG_TYPE           "int"
+#define MSG_STR_TYPES           "bytes or str"
 
-#ifndef DOC_TP_SANDBOX
-#define DOC_TP_SANDBOX          0
-#endif /* DOC_TP_SANDBOX */
+#else /* Python 2 */
 
-#ifndef DOC_SANDBOX_STATUS
-#define DOC_SANDBOX_STATUS      "Runtime state of the sandbox instance "\
-                                "(can be any of S_STATUS_*)"
-#endif /* DOC_SANDBOX_STATUS */
+#define MSG_LONG_TYPE           "long"
+#define MSG_STR_TYPES           "str or unicode"
 
-#ifndef DOC_SANDBOX_RESULT
-#define DOC_SANDBOX_RESULT      "Terminating state of the targeted program " \
-                                "(can be any of S_RESULT_*)"
-#endif /* DOC_SANDBOX_RESULT */
+#endif /* PY3K */
 
-#ifndef DOC_SANDBOX_DUMP
-#define DOC_SANDBOX_DUMP        "Dump an object from the memory space of the " \
-                                "targeted program"
-#endif /* DOC_SANDBOX_DUMP */
-
-#ifndef DOC_SANDBOX_PROBE    
-#define DOC_SANDBOX_PROBE       "Probe the statistics collected by the sandbox"
-#endif /* DOC_SANDBOX_PROBE */
-
-#ifndef DOC_SANDBOX_RUN
-#define DOC_SANDBOX_RUN         "Start to run the task and wait for its " \
-                                "completion"
-#endif /* DOC_SANDBOX_RUN */
-
-/* Error messages */
-
-#ifdef IS_PY3K
-#define MSG_STR_OBJ             "bytes or string object"
-#else
-#define MSG_STR_OBJ             "string or unicode object"
-#endif
-#define MSG_STR_OR_SEQ          "string or sequence of strings"
+#define MSG_STR_OBJ             MSG_STR_TYPES " object"
+#define MSG_STR_OR_SEQ          "str or sequence of str"
 #define MSG_STR_TYPE_ERR        "expect a " MSG_STR_OBJ
 
 #define MSG_ARGS_TOO_LONG       "command line is too long"
@@ -156,28 +168,34 @@ typedef struct
 #define MSG_STDERR_TYPE_ERR     "stderr should be a valid file object"
 #define MSG_STDERR_INVALID      "stdout should be writable by current user"
 
-#define MSG_QUOTA_TYPE_ERR      "quota should be a list or dictionary of " \
-                                "integers"
+#define MSG_QUOTA_TYPE_ERR      "quota should be a list / tuple or dict of " \
+                                MSG_LONG_TYPE " values"
 #define MSG_QUOTA_VAL_ERR       "quota value is invalid"
-#define MSG_QUOTA_INVALID       "failed to access elements in quota list"
+#define MSG_QUOTA_INVALID       "failed to get quota value from list / tuple"
 
-#define MSG_POLICY_TYPE_ERR     "policy should be a callable object"
+#define MSG_POLICY_TYPE_ERR     "policy should be an instance of SandboxPolicy"
 #define MSG_POLICY_CALL_FAILED  "policy failed to determine action"
+#define MSG_POLICY_DEL_FORBID   "policy should not be deleted"
+#define MSG_POLICY_SET_FORBID   "cannot change policy when the sandboxed "\
+                                "program is running"
 
 #define MSG_NO_IMPL             "method is not implemented"
 
 #define MSG_ATTR_ADD_FAILED     "failed to add new attribute to module"
 #define MSG_ALLOC_FAILED        "failed to allocate new object"
+#define MSG_SBOX_INIT_FAILED    "failed in sandbox initialization"
 #define MSG_SBOX_CHECK_FAILED   "failed in sandbox pre-execution check"
 #define MSG_CTRL_CHECK_FAILED   "failed in sandbox control policy check"
 #define MSG_TYPE_READY_FAILED   "failed to finalize new type object"
 #define MSG_TYPE_ADD_FAILED     "failed to add new type object to module"
+#define MSG_BLOCK_SIG_FAILED    "failed to block signals reserved by module"
 
 #define MSG_PROBE_NOT_STARTED   "cannot probe a sandbox that is not started"
 
 #define MSG_DUMP_NOT_BLOCKED    "cannot dump a sandbox unless it is blocked"
 #define MSG_DUMP_PROBE_FAILED   "failed to probe the sandbox"
 #define MSG_DUMP_DUMP_FAILED    "failed to dump the sandbox"
+
 
 #ifdef __cplusplus
 } /* extern "C" */

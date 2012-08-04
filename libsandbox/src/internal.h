@@ -192,6 +192,12 @@ extern "C"
     FUNC_RET("%p", (void *)&((psbox)->result)); \
 }}} /* MONITOR_END */
 
+/* Macros of reserved signals (mostly for the profiler thread) */
+
+#define RT_SIGQUIT (SIGRTMIN + 1)
+#define RT_SIGSTAT (SIGRTMIN + 2)
+#define RT_SIGPROF (SIGRTMIN + 3)
+
 /* Macros for manipulating struct timespec from <time.h> */
 #define ms2ns(x) (1000000 * (x))
 #define ts2ms(x) ((((x).tv_sec) * 1000) + (((x).tv_nsec) / 1000000))

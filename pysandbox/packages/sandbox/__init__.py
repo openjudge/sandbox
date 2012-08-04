@@ -30,13 +30,13 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE   #
 # POSSIBILITY OF SUCH DAMAGE.                                                  #
 ################################################################################
-"""Sandbox Libraries (Python)
+"""The Sandbox Libraries (Python)
 
-The sandbox libraries (libsandbox & pysandbox) provide API's in C/C++ 
-and Python for executing and profiling simple (single process) programs 
-in a restricted environment, or sandbox. Runtime behaviours of binary 
-executable programs can be captured and blocked according to configurable /
-programmable policies.
+The sandbox libraries (libsandbox & pysandbox) provide API's in C/C++ and Python
+for executing and profiling simple (single process) programs in a restricted 
+environment, or sandbox. These API's can help developers to build automated 
+profiling tools and watchdogs that capture and block the runtime behaviours of 
+binary programs according to configurable / programmable policies.
 
 The sandbox libraries are distributed under the terms of the New BSD license
 please refer to the plain text file named COPYING in individual packages.
@@ -59,63 +59,77 @@ from ._sandbox import SandboxEvent, SandboxAction, SandboxPolicy
 from ._sandbox import __version__, __author__
 
 class Sandbox(_sandbox.Sandbox):
+    def __init__(self, *args, **kwds):
+        # Since 0.3.4-3, sandbox initialization is completed within the 
+        # __new__() method rather than in __init__(). And initialized sandbox 
+        # objects expose new *policy* attributes to support policy assignment.
+        # While this ensures the atomicity of sandbox initialization, it also 
+        # breaks backward compatiblity with applications that subclass Sandbox
+        # and monkey-patch the *policy* argument in down-stream __init__() 
+        # methods. The following code assumes the old-style *policy patching*, 
+        # and emulates it with the new-style *policy assignment*.
+        super(Sandbox, self).__init__(*args, **kwds)
+        if 'policy' in kwds:
+            if isinstance(kwds['policy'], SandboxPolicy):
+                self.policy = kwds['policy']
+        pass
     def run(self):
         """Execute the sandboxed program. This method blocks the calling 
 program until the sandboxed program is finished (or terminated).
 """
-        return _sandbox.Sandbox.run(self)
+        return super(Sandbox, self).run()
     def dump(self, typeid, address):
         """Copy the memory block starting from the specificed address of 
 the sandboxed program's memory space, and build an object from the 
 obtained data. Possble typeid's and corresponding return types
 are listed as follows,
 
-  - T_CHAR, T_BYTE, T_UBYTE: long
-  - T_SHORT, T_USHORT, T_INT, T_UINT, T_LONG, T_ULONG: long
+  - T_CHAR, T_BYTE, T_UBYTE: int
+  - T_SHORT, T_USHORT, T_INT, T_UINT, T_LONG, T_ULONG: int
   - T_FLOAT, T_DOUBLE: float
   - T_STRING: str
 """
-        return _sandbox.Sandbox.dump(self, typeid, address)
+        return super(Sandbox, self).dump(typeid, address)
     def probe(self, compatible=True):
         """Return a dictionary containing runtime statistics of the sandboxed 
-program. The result contains the following entries by default, 
+program. By default, the result contains the following entries, 
   
   - cpu_info (4-tuple): 
-      0 (%d): cpu clock time usage (msec)
-      1 (%d): cpu time usage in user mode (msec)
-      2 (%d): cpu time usage in kernel mode (msec)
-      3 (%d): time-stamp counter (# of instructions)
+      0 (int): cpu clock time usage (msec)
+      1 (int): cpu time usage in user mode (msec)
+      2 (int): cpu time usage in kernel mode (msec)
+      3 (long): time-stamp counter (# of instructions)
   - mem_info (6-tuple):
-      0 (%d): runtime virtual memory usage (kilobytes)
-      1 (%d): peak virtual memory usage (kilobytes)
-      2 (%d): runtime resident set size (kilobytes)
-      3 (%d): peak resident set size (kilobytes)
-      4 (%d): minor page faults (# of pages)
-      5 (%d): major page faults (# of pages)
+      0 (int): runtime virtual memory usage (kilobytes)
+      1 (int): peak virtual memory usage (kilobytes)
+      2 (int): runtime resident set size (kilobytes)
+      3 (int): peak resident set size (kilobytes)
+      4 (int): minor page faults (# of pages)
+      5 (int): major page faults (# of pages)
   - signal_info (2-tuple):
-      0 (%d): last / current signal number
-      1 (%d): last / current signal code
+      0 (int): last / current signal number
+      1 (int): last / current signal code
   - syscall_info (2-tuple):
-      0 (%d): last / current system call number
-      1 (%d): last / current system call mode
-  - elapsed (%d): elapsed wallclock time since started (msec)
-  - exitcode (%d): exit status of the sandboxed program
+      0 (int): last / current system call number
+      1 (int): last / current system call mode
+  - elapsed (int): elapsed wallclock time since started (msec)
+  - exitcode (int): exit status of the sandboxed program
 
 When the optional argument *compatible* is True, the result 
 additionally contains the following entries, 
   
-  - cpu (%d): cpu time usage (msec)
-  - cpu.usr (%d): cpu time usage in user mode (msec)
-  - cpu.sys (%d): cpu time usage in kernel mode (msec)
-  - cpu.tsc (%d): time-stamp counter (# of instructions) 
-  - mem.vsize (%d): peak virtual memory usage (kilobytes)
-  - mem.rss (%d): peak resident set size (kilobytes)
-  - mem.minflt (%d): minor page faults (# of pages)
-  - mem.majflt (%d): major page faults (# of pages) 
-  - signal (%d): last / current signal number
-  - syscall (%d): last / current system call number
+  - cpu (int): cpu time usage (msec)
+  - cpu.usr (int): cpu time usage in user mode (msec)
+  - cpu.sys (int): cpu time usage in kernel mode (msec)
+  - cpu.tsc (long): time-stamp counter (# of instructions) 
+  - mem.vsize (int): peak virtual memory usage (kilobytes)
+  - mem.rss (int): peak resident set size (kilobytes)
+  - mem.minflt (int): minor page faults (# of pages)
+  - mem.majflt (int): major page faults (# of pages) 
+  - signal (int): last / current signal number
+  - syscall (int): last / current system call number
 """
-        data = _sandbox.Sandbox.probe(self)
+        data = super(Sandbox, self).probe()
         if data and compatible:
             # cpu_info
             ctime, utime, stime, tsc = data['cpu_info']

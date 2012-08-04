@@ -1,3 +1,23 @@
+[2012/07/12] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox.c moved utime / stime profiling from the tracer to the profiler
+    thread, and used real-time signal RT_SIGSTAT(+1) for notification
+  * in sandbox.c the profiler now depends on real-time signal RT_SIGQUIT(+2) 
+    to quit the main profiling loop instead of sigtimedwait() timeout
+  * in internal.h exposed RT_SIGSTAT and RT_SIGQUIT names with macros
+  * in platform.h removed cutime, cstime, cminflt, cmajflt fields from proc_t
+
+[2012/07/10] LIU Yu, <pineapple.liu@gmail.com>
+  * in README updated introductive messages
+  * in sandbox.c replaced SIGALRM and SIGPROF signals used by the profiler 
+    thread with real-time signals RT_SIGSTAT(+1) and RT_SIGPROF(+3)
+  * in internal.h exposed RT_SIGALRM and RT_SIGPROF names with macros
+  * in sandboc.c restore old sigmask at the end of sandbox_execute()
+
+[2012/07/07] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox.pc revised sandbox.pc.in for correct static linking
+  * in sandbox.c zero-fill struct sigevent vars to suppress valgrind warning
+  * in configure.in updated version to 0.3.4-3
+
 [2012/07/04] LIU Yu, <pineapple.liu@gmail.com>
   * added sandbox.pc.in as pkgconfig file template
   * added sandbox.spec.in as rpm specification template

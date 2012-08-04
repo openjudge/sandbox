@@ -31,11 +31,11 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE   #
 # POSSIBILITY OF SUCH DAMAGE.                                                  #
 ################################################################################
-"""The sandbox libraries (libsandbox & pysandbox) provide API's in C/C++ and
-Python for executing and profiling simple (single process) programs in a 
-restricted environment, or sandbox. Runtime behaviours of binary executable 
-programs can be captured and blocked according to configurable/programmable   
-policies."""
+"""The sandbox libraries (libsandbox & pysandbox) provide API's in C/C++ and Python
+for executing and profiling simple (single process) programs in a restricted 
+environment, or sandbox. These API's can help developers to build automated 
+profiling tools and watchdogs that capture and block the runtime behaviours of 
+binary programs according to configurable / programmable policies."""
 
 from distutils.core import setup, Extension
 from glob import glob
@@ -43,7 +43,7 @@ from os.path import join, basename
 
 NAME = 'pysandbox'
 VERSION = "0.3.4"
-RELEASE = "2"
+RELEASE = "3"
 AUTHOR = "LIU Yu"
 AUTHOR_EMAIL = "pineapple.liu@gmail.com"
 MAINTAINER = AUTHOR
@@ -51,6 +51,22 @@ MAINTAINER_EMAIL = AUTHOR_EMAIL
 URL = "http://sourceforge.net/projects/libsandbox"
 LICENSE = "BSD License"
 DESCRIPTION = "The Sandbox Libraries (Python)"
+
+try:
+    # python 2.7+
+    from subprocess import check_output
+except ImportError:
+    # python 2.6
+    from commands import getoutput
+    check_output = lambda tup: getoutput(' '.join(tup))
+
+try:
+    pkgconfig = ['pkg-config', '--silence-errors', 'libsandbox']
+    core_ccflags = check_output(pkgconfig + ['--cflags', ]).decode().split()
+    core_ldflags = check_output(pkgconfig + ['--libs', ]).decode().split()
+except:
+    core_ccflags = []
+    core_ldflags = ['-lsandbox', '-lrt']
 
 _sandbox = Extension('_sandbox',
     language='c',
@@ -61,9 +77,9 @@ _sandbox = Extension('_sandbox',
                    ('VERSION', '"%s-%s"' % \
                    (VERSION, RELEASE))],
     undef_macros=['DEBUG'], 
-    extra_compile_args=['-Wall', '-Wno-write-strings', '-g0', '-O3'], 
+    extra_compile_args=['-Wall', '-g0', '-O3', '-Wno-write-strings'] + core_ccflags, 
+    extra_link_args=[] + core_ldflags, 
     include_dirs=[join('packages', 'sandbox'), ], 
-    libraries=['sandbox', 'rt'], 
     sources=glob(join('packages', 'sandbox', '*.c')))
 
 setup(name=NAME, 

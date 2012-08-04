@@ -1,4 +1,45 @@
+[2012/07/19] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.c added new attributes owner and group to Sandbox
+
+[2012/07/12] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.c updated signal blocking due to changes in libsandbox
+
+[2012/07/10] LIU Yu, <pineapple.liu@gmail.com>
+  * in README, setup.py sandbox/__init__.py updated introductive message
+  * in sandbox/module.c block signals used by libsandbox during module init
+
+[2012/07/09] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.h added io field in Sandbox C-structure
+  * in sandbox/module.c Sandbox now holds (incref) input / output file objects
+    to ensure their validity during the lifetime of the sandbox object
+  * in sandbox/module.c optimized SandboxPolicy_entry method
+  * in sandbox/module.c added new Get attribute quota to Sandbox
+  * in sandbox/module.c fixed an off-by-one error in Sandbox_load_quota
+  * in sandbox/module.h moved all doc strings to sandbox/module.c
+  * in sandbox/module.c wrapped all doc strings with PyDoc_STRVAR()
+
+[2012/07/08] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.c optimized SandboxPolicy call method
+  * in santbox/module.c added cyclic GC support for Sandbox and SandboxPolicy
+  * in sandbox/module.{h,c} added a new generic base type anyType
+
+[2012/07/07] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.c fixed refcount error in case of Sandbox init failure
+  * in sandbox/module.c added new Get attributes jail, task, pid and GetSet
+    attribute policy to Sandbox
+  * in sandbox/module.c changed accessibility of SandboxEvent members to RO
+  * in sandbox/module.c unified naming of global variables
+  * in sandbox/module.h changed error type of policy check failure from Assertion-
+    Error to ValueError and updated respective error messages
+  * in sandbox/module.h removed repetitive doc strings of Sandbox methods
+  * in setup.py query pkg-config for compile / link arguments of the core library
+  * in setup.{py,cfg} updated version to 0.3.4-3
+
 [2012/07/04] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/__init__.py converted EOL to UNIX conventions
+  * in sandbox/module.h revised some error messages
+  * in sandbox/module.c moved PY3K detection macros to sandbox/module.h
+  * in sandbox/module.c renamed SandboxQuota_FromPyObject() -> ..._FromObject()
   * in setup.{py,cfg} updated version to 0.3.4-2
 
 [2012/06/08] LIU Yu, <pineapple.liu@gmail.com>

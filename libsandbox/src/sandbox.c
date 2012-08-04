@@ -363,10 +363,10 @@ sandbox_execute(sandbox_t * psbox)
     }
 #endif /* WITH_REALTIME_SCHED */
     
-    /* By default, block as many signals as possible. */
-    sigset_t sigset;
+    /* Block as many signals as possible */
+    sigset_t sigset, oldset;
     sigfillset(&sigset);
-    if (pthread_sigmask(SIG_BLOCK, &sigset, NULL) != 0)
+    if (pthread_sigmask(SIG_BLOCK, &sigset, &oldset) != 0)
     {
         WARN("pthread_sigmask");
         FUNC_RET("%p", &psbox->result);
@@ -450,6 +450,13 @@ sandbox_execute(sandbox_t * psbox)
         }
     }
     DBUG("joined %d of %d monitoring threads", i, cnt);
+    
+    /* Restore old signal mask */
+    if (pthread_sigmask(SIG_SETMASK, &oldset, NULL) != 0)
+    {
+        WARN("pthread_sigmask");
+    }
+    DBUG("restored old signal mask");
     
     FUNC_RET("%p", &psbox->result);
 }
@@ -931,7 +938,7 @@ __sandbox_profiler(sandbox_t * psbox)
     /* Profiling is by means of sampling the cpu clock time of the prisoner 
      * process at a relatively high frequency, i.e. 1kHz, and raise an out-of-
      * quota (cpu) event as soon as it happens. The profiling timer will emit
-     * SIGPROF signals to the profiler thread. */
+     * RT_SIGPROF signals to the profiler thread. */
     
     struct itimerspec its;
     struct sigevent sev;
@@ -940,15 +947,16 @@ __sandbox_profiler(sandbox_t * psbox)
     timer_t pf_timer;           /* profiling timer */
     
     /* Stop-watch timer for updating elapsed time and raising out-of-quota
-     * (wallclock) events. */
+     * (wallclock and memory) events. */
     
     its.it_interval.tv_sec = 0;
     its.it_interval.tv_nsec = ms2ns(200);
     its.it_value.tv_sec = 0;
     its.it_value.tv_nsec = ms2ns(200);
     
+    memset(&sev, 0, sizeof(struct sigevent));
     sev.sigev_value.sival_ptr = &sw_timer;
-    sev.sigev_signo = SIGALRM;
+    sev.sigev_signo = RT_SIGSTAT;
     sev.sigev_notify = SIGEV_SIGNAL;
     
     if (timer_create(CLOCK_REALTIME, &sev, &sw_timer) != 0)
@@ -978,7 +986,7 @@ __sandbox_profiler(sandbox_t * psbox)
         MONITOR_END(psbox);
     }
     
-    /* Profiling timer for emitting SIGPROF signals. The timer will fire 
+    /* Profiling timer for emitting RT_SIGPROF signals. The timer will fire 
      * periodically at a freq of PROF_FREQ (Hz). At a freq of 0.25kHz, the cpu 
      * clock of the prisoner process is sampled once every 4msec, and the time
      * accuracy of profiling is expected to be within 10msec. After the first 
@@ -993,8 +1001,9 @@ __sandbox_profiler(sandbox_t * psbox)
     its.it_value.tv_sec = 0;
     its.it_value.tv_nsec = ms2ns(10); /* warmup time */
     
+    memset(&sev, 0, sizeof(struct sigevent));
     sev.sigev_value.sival_ptr = &pf_timer;
-    sev.sigev_signo = SIGPROF;
+    sev.sigev_signo = RT_SIGPROF;
     sev.sigev_notify = SIGEV_SIGNAL;
     
     if (timer_create(CLOCK_REALTIME, &sev, &pf_timer) != 0)
@@ -1015,8 +1024,12 @@ __sandbox_profiler(sandbox_t * psbox)
     
     /* Wait and handle signals */
     
+    proc_t proc = {0};
+    proc_bind(psbox, &proc);
+    
     sigset_t sigset;
     sigfillset(&sigset);
+    sigdelset(&sigset, SIGCHLD);
     sigdelset(&sigset, SIGPWR);
     sigdelset(&sigset, SIGWINCH);
     sigdelset(&sigset, SIGURG);
@@ -1028,71 +1041,14 @@ __sandbox_profiler(sandbox_t * psbox)
         
         int signo;
         siginfo_t siginfo;
-        ts.tv_sec = 0;
-        ts.tv_nsec = ms2ns(200);        
-        if ((signo = sigtimedwait(&sigset, &siginfo, &ts)) < 0)
+        if ((signo = sigwaitinfo(&sigset, &siginfo)) < 0)
         {
-            P(&psbox->mutex);
-            continue;
+            WARN("failed waiting for signals");
+            goto check_status;
         }
         
-        switch (signo)
+        if (signo == RT_SIGPROF)
         {
-        case SIGCHLD:
-            /* cpu_info */
-            #define CPU_UPDATE(a,x) \
-            {{{ \
-                ((a).tv_sec) = ((((x).tv_sec) > ((a).tv_sec)) ? \
-                                ((x).tv_sec) : ((a).tv_sec)); \
-                ((a).tv_nsec) = (((((x).tv_sec) > ((a).tv_sec)) || \
-                                  (((((x).tv_sec) == ((a).tv_sec))) && \
-                                   ((((x).tv_nsec) > ((a).tv_nsec))))) ? \
-                                 ((x).tv_nsec) : ((a).tv_nsec)); \
-            }}} /* CPU_UPDATE */
-            #define CPU_UPDATE_CLK(ts,clk) \
-            {{{ \
-                long CLK_TCK = sysconf(_SC_CLK_TCK); \
-                struct timespec newts; \
-                newts.tv_sec = ((time_t)((clk) / CLK_TCK)); \
-                newts.tv_nsec = (1000000000UL * ((clk) % (CLK_TCK)) / CLK_TCK); \
-                newts.tv_sec += newts.tv_nsec / 1000000000UL; \
-                newts.tv_nsec %= 1000000000UL; \
-                CPU_UPDATE((ts), newts); \
-            }}} /* CPU_UPDATE_CLK */
-            P(&psbox->mutex);
-            if (siginfo.si_pid == pid)
-            {
-                CPU_UPDATE_CLK(psbox->stat.cpu_info.utime, siginfo.si_utime);
-                CPU_UPDATE_CLK(psbox->stat.cpu_info.stime, siginfo.si_stime);
-            }
-            V(&psbox->mutex);
-            break;
-        case SIGALRM:
-            /* Update the elapsed time stat of sandbox, raise out-of-quota
-             * (wallclock) event when occured. */
-            if (clock_gettime(CLOCK_REALTIME, &ts) != 0)
-            {
-                WARN("failed getting wallclock elapsed time");
-                POST_EVENT(psbox, _ERROR, errno, pthread_self());
-                break;
-            }
-            P(&psbox->mutex);
-            TS_SUBTRACT(ts, psbox->stat.started);
-            psbox->stat.elapsed = ts;
-            if ((res_t)ts2ms(psbox->stat.elapsed) > 
-                psbox->task.quota[S_QUOTA_WALLCLOCK])
-            {
-                DBUG("wallclock quota exceeded");
-                V(&psbox->mutex);
-                /* NOTE: unlock the sandbox before posting events */
-                POST_EVENT(psbox, _QUOTA, S_QUOTA_WALLCLOCK);
-            }
-            else
-            {
-                V(&psbox->mutex);
-            }
-            break;
-        case SIGPROF:
             /* Sample the cpu clock time of the prisoner process */
             if (clock_gettime(clockid, &ts) != 0)
             {
@@ -1100,7 +1056,7 @@ __sandbox_profiler(sandbox_t * psbox)
                 kill(-pid, SIGKILL);
                 /* Do NOT post event here because the prisoner proceess may
                  * have gone making the clock invalid. */
-                break;
+                goto check_status;
             }
             /* Update sandbox stat with the sampled data */
             P(&psbox->mutex);
@@ -1124,7 +1080,107 @@ __sandbox_profiler(sandbox_t * psbox)
             {
                 V(&psbox->mutex);
             }
-            break;
+            goto check_status;
+        }
+        
+        if (signo == RT_SIGSTAT)
+        {
+            /* Collect stat of prisoner process */        
+            if (!proc_probe(pid, PROBE_STAT, &proc))
+            {
+                WARN("failed to probe process: %d", pid);
+                /* Do NOT post event here because the prisoner proceess may
+                 * have gone making the procfs entry invalid. */
+                kill(-pid, SIGKILL);
+                goto check_status;
+            }
+            
+            P(&psbox->mutex);
+
+            /* cpu_info */
+            #define CPU_UPDATE(a,x) \
+            {{{ \
+                ((a).tv_sec) = ((((x).tv_sec) > ((a).tv_sec)) ? \
+                                ((x).tv_sec) : ((a).tv_sec)); \
+                ((a).tv_nsec) = (((((x).tv_sec) > ((a).tv_sec)) || \
+                                  (((((x).tv_sec) == ((a).tv_sec))) && \
+                                   ((((x).tv_nsec) > ((a).tv_nsec))))) ? \
+                                 ((x).tv_nsec) : ((a).tv_nsec)); \
+            }}} /* CPU_UPDATE */
+            
+            CPU_UPDATE(psbox->stat.cpu_info.utime, proc.utime);
+            CPU_UPDATE(psbox->stat.cpu_info.stime, proc.stime);
+            
+            /* mem_info */
+            #define MEM_UPDATE(a,b) \
+            {{{ \
+                (a) = (b); \
+                (a ## _peak) = (((a ## _peak) > (a)) ? (a ## _peak) : (a)); \
+            }}} /* MEM_UPDATE */
+            
+            MEM_UPDATE(psbox->stat.mem_info.vsize, proc.vsize);
+            MEM_UPDATE(psbox->stat.mem_info.rss, proc.rss * getpagesize());
+            psbox->stat.mem_info.minflt = proc.minflt;
+            psbox->stat.mem_info.majflt = proc.majflt;
+            
+            /* Compare memory usage against quota limit, raise out-of-quota 
+             * (memory) event when necessary. */
+            if (psbox->stat.mem_info.vsize_peak > \
+                psbox->task.quota[S_QUOTA_MEMORY])
+            {
+                DBUG("memory quota exceeded");
+                V(&psbox->mutex);
+                /* NOTE: unlock the sandbox before posting events */
+                POST_EVENT(psbox, _QUOTA, S_QUOTA_MEMORY);
+            }
+            else
+            {
+                V(&psbox->mutex);
+            }
+            
+            /* Update the elapsed time stat of sandbox, raise out-of-quota
+             * (wallclock) event when occured. */
+            if (clock_gettime(CLOCK_REALTIME, &ts) != 0)
+            {
+                WARN("failed getting wallclock elapsed time");
+                /* NOTE: unlock the sandbox before posting events */
+                POST_EVENT(psbox, _ERROR, errno, pthread_self());
+                goto check_status;
+            }
+            
+            P(&psbox->mutex);
+            
+            TS_SUBTRACT(ts, psbox->stat.started);
+            psbox->stat.elapsed = ts;
+            
+            /* Compare elapsed time against quota limit, raise out-of-quota 
+             * (wallclock) event when necessary. */
+            if ((res_t)ts2ms(psbox->stat.elapsed) > 
+                psbox->task.quota[S_QUOTA_WALLCLOCK])
+            {
+                DBUG("wallclock quota exceeded");
+                V(&psbox->mutex);
+                /* NOTE: unlock the sandbox before posting events */
+                POST_EVENT(psbox, _QUOTA, S_QUOTA_WALLCLOCK);
+            }
+            else
+            {
+                V(&psbox->mutex);
+            }
+            
+            goto check_status;
+        }
+        
+        if (signo == RT_SIGQUIT)
+        {
+            /* Do not exit the profiling loop immediately. Instead, go back to 
+             * the front to verify if the tracer thread is already finished. */
+            DBUG("received quit signal %d", signo);
+            goto check_status;
+        }
+        
+        switch (signo)
+        {
         case SIGTERM:
         case SIGINT:
         case SIGQUIT:
@@ -1144,10 +1200,13 @@ __sandbox_profiler(sandbox_t * psbox)
             kill(-pid, SIGKILL);
             break;
         }
+        
+check_status:
         P(&psbox->mutex);
+        continue;
     }
     V(&psbox->mutex);
-
+    
     timer_delete(sw_timer);
     timer_delete(pf_timer);
     
@@ -1263,6 +1322,7 @@ __sandbox_tracer(sandbox_t * psbox)
     UPDATE_STATUS(psbox, S_STATUS_EXE);
     
     /* Temporary variables. */
+    pid_t self = getpid();
     pid_t pid = psbox->ctrl.pid;
     siginfo_t w_info;
     int w_opt = WEXITED | WSTOPPED;
@@ -1289,45 +1349,18 @@ __sandbox_tracer(sandbox_t * psbox)
         /* Trace state refresh of the prisoner process */
         UPDATE_STATUS(psbox, S_STATUS_BLK);
 
-        /* Collect stat of prisoner process */
-        if (!proc_probe(pid, PROBE_STAT | PROBE_SIGINFO, &proc))
+        /* Obtain signal info of prisoner process */
+        if (!proc_probe(pid, PROBE_SIGINFO, &proc))
         {
             WARN("failed to probe process: %d", pid);
             kill(-pid, SIGKILL);
         }
-        /* Sample resource usage and update sandbox stat */
-        else
+        
+        /* Notify the profiler thread to examine stat */
+        if (kill(self, RT_SIGSTAT) != 0)
         {
-            P(&psbox->mutex);
-            
-            /* mem_info */
-            #define MEM_UPDATE(a,b) \
-            {{{ \
-                (a) = (b); \
-                (a ## _peak) = (((a ## _peak) > (a)) ? (a ## _peak) : (a)); \
-            }}} /* MEM_UPDATE */
-            MEM_UPDATE(psbox->stat.mem_info.vsize, proc.vsize);
-            MEM_UPDATE(psbox->stat.mem_info.rss, proc.rss * getpagesize());
-            psbox->stat.mem_info.minflt = proc.minflt;
-            psbox->stat.mem_info.majflt = proc.majflt;
-            
-            /* Compare memory usage against quota limit, raise out-of-quota 
-             * (memory) event when necessary. In fact, memory allocation is
-             * always associated with system calls. So it is sufficient to 
-             * place the following test in the SIGTRAP branch of switch(),
-             * They are placed here only to improve readability. */
-            if (psbox->stat.mem_info.vsize_peak > \
-                psbox->task.quota[S_QUOTA_MEMORY])
-            {
-                V(&psbox->mutex);
-                /* NOTE: unlock the sandbox before posting events */
-                DBUG("memory quota exceeded");
-                POST_EVENT(psbox, _QUOTA, S_QUOTA_MEMORY);
-            }
-            else
-            {
-                V(&psbox->mutex);
-            }
+            WARN("failed to notify the profiler thread");
+            kill(-pid, SIGKILL);
         }
         
         /* Raise appropriate events judging each wait status */
@@ -1362,26 +1395,19 @@ __sandbox_tracer(sandbox_t * psbox)
                 {
                     WARN("failed to probe process: %d", pid);
                     kill(-pid, SIGKILL);
+                    break;
                 }
                 /* Inspect opcode and tracing flags to see if the SIGTRAP
                  * signal was due to a system call invocation or return. The 
                  * subtleties are wrapped in the IS_SYSCALL and IS_SYSRET 
                  * macros defined in <platform.h> */
-                else if (IS_SYSCALL(&proc) || IS_SYSRET(&proc))
+                if (IS_SYSCALL(&proc) || IS_SYSRET(&proc))
                 {
                     long sc = THE_SYSCALL(&proc);
                     
                     P(&psbox->mutex);
                     psbox->stat.syscall = sc;
                     V(&psbox->mutex);
-                    
-#ifdef DELETED
-                    if (THE_SCMODE(&proc) >= SCMODE_MAX)
-                    {
-                        WARN("illegal system call mode");
-                        kill(-pid, SIGSYS);
-                    }
-#endif /* DELETED */
                     
                     if (sc != sc_stack[sc_top])
                     {
@@ -1493,6 +1519,9 @@ __sandbox_tracer(sandbox_t * psbox)
      * monitors so that they can exit respective monitoring loop as well.  */
     FLUSH_ALL_EVENTS(psbox);
     
+    /* Final notification for monitors to exit respective monitoring loops. */
+    kill(self, RT_SIGQUIT);
+    
     /* Notify trace_main() to return */
     trace_end(&proc);
     
@@ -1511,7 +1540,7 @@ sandbox_default_policy(const policy_t * ppolicy, const event_t * pevent,
     case S_EVENT_SYSCALL:
         /* Unsupported system call modes (e.g. 32bit libsandbox observes system
          * calls from the 64bit table) are considered illegal. */
-        if (pevent->data._SYSCALL.scinfo >= MAKE_WORD(0, SCMODE_MAX))
+        if ((unsigned)pevent->data._SYSCALL.scinfo >= MAKE_WORD(0, SCMODE_MAX))
         {
             WARN("illegal system call mode");
             *paction = (action_t){S_ACTION_KILL, {{S_RESULT_RF}}};

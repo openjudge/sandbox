@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 ################################################################################
-# Sandbox Libraries (Python) - Sample Script                                   #
+# The Sandbox Libraries (Python) - Sample Script                               #
 #                                                                              #
 # Copyright (C) 2009-2012 LIU Yu, <pineapple.liu@gmail.com>                    #
 # All rights reserved.                                                         #
@@ -42,7 +42,7 @@ try:
         raise AssertionError("Unsupported platform type.\n")
     # check package availability / version
     import sandbox
-    if not hasattr(sandbox, '__version__') or sandbox.__version__ < "0.3.3-rc2":
+    if not hasattr(sandbox, '__version__') or sandbox.__version__ < "0.3.4-3":
         raise AssertionError("Unsupported sandbox version.\n")
     from sandbox import *
 except ImportError:
@@ -88,9 +88,9 @@ class MiniSandbox(SandboxPolicy,Sandbox):
         for scno in MiniSandbox.sc_safe[machine]:
             self.sc_table[scno] = self._CONT
         # initialize as a polymorphic sandbox-and-policy object
-        kwds['policy'] = self
         SandboxPolicy.__init__(self)
         Sandbox.__init__(self, *args, **kwds)
+        self.policy = self
     def probe(self):
         # add custom entries into the probe dict
         d = Sandbox.probe(self, False)
@@ -99,7 +99,7 @@ class MiniSandbox(SandboxPolicy,Sandbox):
         d['result'] = result_name(self.result)
         return d
     def __call__(self, e, a):
-        # handle SYSCALL/SYSRET events with local handlers
+        # handle SYSCALL/SYSRET events with local rules
         if e.type in (S_EVENT_SYSCALL, S_EVENT_SYSRET):
             if machine is 'x86_64' and e.ext0 is not 0:
                 return self._KILL_RF(e, a)

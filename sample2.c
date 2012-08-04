@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Sandbox Libraries (Core) - C Sample Program                                 *
+ * The Sandbox Libraries (Core) - C Sample Program                             *
  *                                                                             *
  * Copyright (C) 2012 LIU Yu, pineapple.liu@gmail.com                          *
  * All rights reserved.                                                        *
@@ -31,20 +31,20 @@
  * POSSIBILITY OF SUCH DAMAGE.                                                 *
  ******************************************************************************/
 
-#include <stdio.h>
-#include <assert.h>
-#include <sysexits.h>
-#include <unistd.h>
-#include <sandbox.h>
+/* check platform type */
+#if !defined(__linux__) || (!defined(__x86_64__) && !defined(__i386__))
+#error "Unsupported platform type"
+#endif /**/
 
 #ifndef PROG_NAME
 #define PROG_NAME "sample2"
 #endif /* PROG_NAME */
 
-/* check platform type */
-#if !defined(__linux__) || (!defined(__x86_64__) && !defined(__i386__))
-#error "Unsupported platform type"
-#endif /**/
+#include <stdio.h>
+#include <assert.h>
+#include <sysexits.h>
+#include <unistd.h>
+#include <sandbox.h>
 
 /* mini sandbox with embedded policy */
 typedef action_t* (*rule_t)(const sandbox_t*, const event_t*, action_t*);

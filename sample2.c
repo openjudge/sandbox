@@ -109,7 +109,7 @@ main(int argc, const char* argv[])
 static unsigned long
 ts2ms(struct timespec ts)
 {
-    return ts.tv_sec * 1000 + ts.tv_nsec / 100000;
+    return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
 res_t 

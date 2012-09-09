@@ -37,7 +37,7 @@
 #include <errno.h>              /* ECHILD, EINVAL */
 #include <grp.h>                /* struct group, getgrgid() */
 #include <pwd.h>                /* struct passwd, getpwuid() */
-#include <pthread.h>            /* pthread_{cond_,mutex_,sigmask}*(), ... */
+#include <pthread.h>            /* pthread_{create,join,sigmask,...}() */
 #include <signal.h>             /* kill(), SIG* */
 #include <stdlib.h>             /* EXIT_{SUCCESS,FAILURE} */
 #include <string.h>             /* str{cpy,cmp,str}(), mem{set,cpy}() */
@@ -69,130 +69,88 @@ extern "C"
 
 /* Local macros (mostly for event handling) */
 
-#define _QUEUE_EMPTY(pctrl) \
-    ((((pctrl)->event).size) <= 0) \
-/* _QUEUE_EMPTY */
+#define __QUEUE_EMPTY(pctrl) \
+    (((pctrl)->event.size) <= 0) \
+/* __QUEUE_EMPTY */
 
-#define _QUEUE_FULL(pctrl) \
-    ((((pctrl)->event).size) >= (SBOX_EVENT_MAX)) \
-/* _QUEUE_FULL */
+#define __QUEUE_FULL(pctrl) \
+    (((pctrl)->event.size) >= (SBOX_EVENT_MAX)) \
+/* __QUEUE_FULL */
 
-#define _QUEUE_FRONT(pctrl) \
-    (((pctrl)->event).queue[(((pctrl)->event).head)]) \
-/* _QUEUE_FRONT */
+#define __QUEUE_HEAD(pctrl) \
+    ((pctrl)->event.list[((pctrl)->event.head)]) \
+/* __QUEUE_HEAD */
 
-#define _QUEUE_POP(pctrl) \
+#define __QUEUE_POP(pctrl) \
 {{{ \
-    if (!_QUEUE_EMPTY(pctrl)) \
+    if (!__QUEUE_EMPTY(pctrl)) \
     { \
-        (((pctrl)->event).head) += 1; \
-        (((pctrl)->event).head) %= (SBOX_EVENT_MAX); \
-        (((pctrl)->event).size) -= 1; \
+        ++((pctrl)->event.head); \
+        ((pctrl)->event.head) %= (SBOX_EVENT_MAX); \
+        --((pctrl)->event.size); \
     } \
-}}} /* _QUEUE_POP */
+}}} /* __QUEUE_POP */
 
-#define _QUEUE_PUSH(pctrl,e) \
+#define __QUEUE_PUSH(pctrl,elem) \
 {{{ \
-    assert((((pctrl)->event).size) < (SBOX_EVENT_MAX)); \
-    ((pctrl)->event).queue[(((((pctrl)->event).head) + \
-        (((pctrl)->event).size)) % (SBOX_EVENT_MAX))] = (e); \
-    (((pctrl)->event).size) += 1; \
-}}} /* _QUEUE_PUSH */
+    assert(((pctrl)->event.size) < (SBOX_EVENT_MAX)); \
+    (pctrl)->event.list[((((pctrl)->event.head) + \
+        ((pctrl)->event.size)) % (SBOX_EVENT_MAX))] = (elem); \
+    ++((pctrl)->event.size); \
+}}} /* __QUEUE_PUSH */
 
-#define _QUEUE_CLEAR(pctrl) \
+#define __QUEUE_CLEAR(pctrl) \
 {{{ \
-    (((pctrl)->event).head) = (((pctrl)->event).size) = 0; \
-    memset((((pctrl)->event).queue), 0, (SBOX_EVENT_MAX) * sizeof(event_t)); \
-    pthread_cond_broadcast(&((pctrl)->sched)); \
-}}} /* _QUEUE_CLEAR */
+    ((pctrl)->event.head) = ((pctrl)->event.size) = 0; \
+    memset(((pctrl)->event.list), 0, (SBOX_EVENT_MAX) * sizeof(event_t)); \
+}}} /* __QUEUE_CLEAR */
 
 #define POST_EVENT(psbox,type,x...) \
 {{{ \
-    P(&((psbox)->ctrl.mutex)); \
-    P(&((psbox)->mutex)); \
+    LOCK_ON_COND(psbox, EX, !__QUEUE_FULL(&((psbox)->ctrl))); \
     if (!HAS_RESULT(psbox)) \
     { \
-        V(&((psbox)->mutex)); \
-        while (_QUEUE_FULL(&((psbox)->ctrl))) \
-        { \
-            pthread_cond_wait(&((psbox)->ctrl.sched), &((psbox)->ctrl.mutex)); \
-        } \
-        _QUEUE_PUSH(&((psbox)->ctrl), ((event_t){(S_EVENT ## type), {{x}}})); \
+        __QUEUE_PUSH(&((psbox)->ctrl), ((event_t){(S_EVENT ## type), {{x}}})); \
     } \
-    else \
-    { \
-        V(&((psbox)->mutex)); \
-    } \
-    pthread_cond_broadcast(&((psbox)->ctrl.sched)); \
-    V(&((psbox)->ctrl.mutex)); \
+    UNLOCK(psbox); \
 }}} /* POST_EVENT */
 
-#define WAIT4_EVENT_HANDLING(psbox, pproc) \
+#define MONITOR_ERROR(psbox,x...) \
 {{{ \
-    P(&((psbox)->ctrl.mutex)); \
-    P(&((psbox)->mutex)); \
-    while (!_QUEUE_EMPTY(&((psbox)->ctrl)) && !HAS_RESULT(psbox)) \
+    WARN(x); \
+    if (errno != ESRCH) \
     { \
-        DBUG("waiting for %d event(s) to be handled", \
-            (((psbox)->ctrl.event).size)); \
-        V(&((psbox)->mutex)); \
-        pthread_cond_wait(&((psbox)->ctrl.sched), &((psbox)->ctrl.mutex)); \
-        P(&((psbox)->mutex)); \
+        POST_EVENT((psbox), _ERROR, errno); \
+        kill(-((psbox)->ctrl.pid), SIGKILL); \
     } \
-    if (HAS_RESULT(psbox)) \
-    { \
-        DBUG("exiting the tracing loop"); \
-        V(&((psbox)->mutex)); \
-        V(&((psbox)->ctrl.mutex)); \
-        break; \
-    } \
-    V(&((psbox)->mutex)); \
-    V(&((psbox)->ctrl.mutex)); \
-}}} /* WAIT4_EVENT_HANDLING */
-
-#define FLUSH_ALL_EVENTS(psbox) \
-{{{ \
-    P(&((psbox)->ctrl.mutex)); \
-    P(&((psbox)->mutex)); \
-    while (!_QUEUE_EMPTY(&((psbox)->ctrl)) && !HAS_RESULT(psbox)) \
-    { \
-        pthread_cond_wait(&((psbox)->update), &((psbox)->mutex)); \
-    } \
-    _QUEUE_CLEAR(&((psbox)->ctrl)); \
-    V(&((psbox)->mutex)); \
-    V(&((psbox)->ctrl.mutex)); \
-}}} /* FLUSH_ALL_EVENTS */
+}}} /* MONITOR_ERROR */
 
 /* Macros for updating sandbox status / result */
 
-#define _UPDATE_RESULT(psbox,res) \
+#define __UPDATE_RESULT(psbox,res) \
 {{{ \
     ((psbox)->result) = (result_t)(res); \
-    pthread_cond_broadcast(&((psbox)->update)); \
-    pthread_cond_broadcast(&((psbox)->ctrl.sched)); \
     DBUG("result: %s", s_result_name(((psbox)->result))); \
-}}} /* _UPDATE_RESULT */
+}}} /* __UPDATE_RESULT */
 
-#define _UPDATE_STATUS(psbox,sta) \
+#define __UPDATE_STATUS(psbox,sta) \
 {{{ \
     ((psbox)->status) = (status_t)(sta); \
-    pthread_cond_broadcast(&((psbox)->update)); \
-    pthread_cond_broadcast(&((psbox)->ctrl.sched)); \
     DBUG("status: %s", s_status_name(((psbox)->status))); \
-}}} /* _UPDATE_STATUS */
+}}} /* __UPDATE_STATUS */
 
 #define UPDATE_RESULT(psbox,res) \
 {{{ \
-    P(&((psbox)->mutex)); \
-    _UPDATE_RESULT(psbox, res); \
-    V(&((psbox)->mutex)); \
+    LOCK(psbox, EX); \
+    __UPDATE_RESULT(psbox, res); \
+    UNLOCK(psbox); \
 }}} /* UPDATE_RESULT */
 
 #define UPDATE_STATUS(psbox,sta) \
 {{{ \
-    P(&((psbox)->mutex)); \
-    _UPDATE_STATUS(psbox, sta); \
-    V(&((psbox)->mutex)); \
+    LOCK(psbox, EX); \
+    __UPDATE_STATUS(psbox, sta); \
+    UNLOCK(psbox); \
 }}} /* UPDATE_STATUS */
 
 /* Local function prototypes */
@@ -209,9 +167,8 @@ static void __sandbox_ctrl_init(ctrl_t *, thread_func_t);
 static int  __sandbox_ctrl_add_monitor(ctrl_t *, thread_func_t);
 static void __sandbox_ctrl_fini(ctrl_t *);
 
-static void * __sandbox_tracer(sandbox_t *);
-static void * __sandbox_watcher(sandbox_t *);
-static void * __sandbox_profiler(sandbox_t *);
+void * sandbox_watcher(sandbox_t *);
+void * sandbox_profiler(sandbox_t *);
 
 int 
 sandbox_init(sandbox_t * psbox, const char * argv[])
@@ -224,19 +181,16 @@ sandbox_init(sandbox_t * psbox, const char * argv[])
         FUNC_RET("%d", -1);
     }
     
-    pthread_mutex_init(&psbox->mutex, NULL);
-    P(&psbox->mutex);
-    pthread_cond_init(&psbox->update, NULL);
+    psbox->lock = LOCK_INITIALIZER;
+    LOCK(psbox, EX);
     __sandbox_task_init(&psbox->task, argv);
     __sandbox_stat_init(&psbox->stat);
-    __sandbox_ctrl_init(&psbox->ctrl, (thread_func_t)trace_main);
-    __sandbox_ctrl_add_monitor(&psbox->ctrl, (thread_func_t)__sandbox_tracer);
-    __sandbox_ctrl_add_monitor(&psbox->ctrl, (thread_func_t)__sandbox_watcher);
-    __sandbox_ctrl_add_monitor(&psbox->ctrl, (thread_func_t)__sandbox_profiler);
-    V(&psbox->mutex);
-    
-    UPDATE_RESULT(psbox, S_RESULT_PD);
-    UPDATE_STATUS(psbox, S_STATUS_PRE);
+    __sandbox_ctrl_init(&psbox->ctrl, (thread_func_t)sandbox_tracer);
+    __sandbox_ctrl_add_monitor(&psbox->ctrl, (thread_func_t)sandbox_profiler);
+    __sandbox_ctrl_add_monitor(&psbox->ctrl, (thread_func_t)sandbox_watcher);
+    __UPDATE_RESULT(psbox, S_RESULT_PD);
+    __UPDATE_STATUS(psbox, S_STATUS_PRE);
+    UNLOCK(psbox);
     
     FUNC_RET("%d", 0);
 }
@@ -252,16 +206,14 @@ sandbox_fini(sandbox_t * psbox)
         FUNC_RET("%d", -1);
     }
     
-    UPDATE_RESULT(psbox, S_RESULT_PD);
-    UPDATE_STATUS(psbox, S_STATUS_FIN);
-    
-    P(&psbox->mutex);
+    LOCK(psbox, EX);
+    __UPDATE_RESULT(psbox, S_RESULT_PD);
+    __UPDATE_STATUS(psbox, S_STATUS_FIN);
     __sandbox_task_fini(&psbox->task);
     __sandbox_stat_fini(&psbox->stat);
     __sandbox_ctrl_fini(&psbox->ctrl);
-    pthread_cond_destroy(&psbox->update);
-    V(&psbox->mutex);
-    pthread_mutex_destroy(&psbox->mutex);
+    UNLOCK(psbox);
+    psbox->lock = LOCK_INITIALIZER;
     
     FUNC_RET("%d", 0);
 }
@@ -277,12 +229,12 @@ sandbox_check(sandbox_t * psbox)
         FUNC_RET("%d", false);
     }
     
-    P(&psbox->mutex);
+    LOCK(psbox, EX);
     
     /* Don't change the state of a running / blocking sandbox */
     if (!NOT_STARTED(psbox) && !IS_FINISHED(psbox))
     {
-        V(&psbox->mutex);
+        UNLOCK(psbox);
         FUNC_RET("%d", false);
     }
     DBUG("passed sandbox status check");
@@ -292,43 +244,35 @@ sandbox_check(sandbox_t * psbox)
     {
         __sandbox_stat_fini(&psbox->stat);
         __sandbox_stat_init(&psbox->stat);
-        _UPDATE_RESULT(psbox, S_RESULT_PD);
     }
     
-    /* Update status to PRE */
-    if (psbox->status != S_STATUS_PRE)
-    {
-        _UPDATE_STATUS(psbox, S_STATUS_PRE);
-    }
+    __UPDATE_RESULT(psbox, S_RESULT_PD);
+    __UPDATE_STATUS(psbox, S_STATUS_PRE);
     
     if (!__sandbox_task_check(&psbox->task))
     {
-        V(&psbox->mutex);
+        UNLOCK(psbox);
         FUNC_RET("%d", false);
     }
     DBUG("passed task spec validation");
     
-    if (psbox->ctrl.tracer == NULL)
+    if (psbox->ctrl.tracer.target == NULL)
     {
-        V(&psbox->mutex);
+        UNLOCK(psbox);
         FUNC_RET("%d", false);
     }
     DBUG("passed ctrl tracer validation");
     
-    if (psbox->ctrl.monitor[0] == NULL)
+    if (psbox->ctrl.monitor[0].target == NULL)
     {
-        V(&psbox->mutex);
+        UNLOCK(psbox);
         FUNC_RET("%d", false);
     }
     DBUG("passed ctrl monitor validation");
     
-    /* Update status to RDY */
-    if (psbox->status != S_STATUS_RDY)
-    {
-        _UPDATE_STATUS(psbox, S_STATUS_RDY);
-    }
-    V(&psbox->mutex);
+    __UPDATE_STATUS(psbox, S_STATUS_RDY);
     
+    UNLOCK(psbox);
     FUNC_RET("%d", true);
 }
 
@@ -340,7 +284,7 @@ sandbox_execute(sandbox_t * psbox)
     
     if (psbox == NULL)
     {
-        FUNC_RET("%p", NULL);
+        FUNC_RET("%p", (result_t *)NULL);
     }
     
     if (!sandbox_check(psbox))
@@ -356,52 +300,27 @@ sandbox_execute(sandbox_t * psbox)
     {
         if (sched_setscheduler(0, SCHED_RR, &param) != 0)
         {
-            WARN("failed setting realtime scheduling policy");
+            WARN("failed to apply realtime scheduling policy");
             FUNC_RET("%p", &psbox->result);
         }
         DBUG("applied realtime scheduling policy");
     }
 #endif /* WITH_REALTIME_SCHED */
-    
+
+#ifdef WITH_TRACE_POOL
+#else   
     /* Block as many signals as possible */
-    sigset_t sigset, oldset;
-    sigfillset(&sigset);
-    if (pthread_sigmask(SIG_BLOCK, &sigset, &oldset) != 0)
+    sigset_t sigmask, oldmask;
+    sigfillset(&sigmask);
+    if (pthread_sigmask(SIG_BLOCK, &sigmask, &oldmask) != 0)
     {
         WARN("pthread_sigmask");
         FUNC_RET("%p", &psbox->result);
     }
     DBUG("blocked all signals");
+#endif /* WITH_TRACE_POOL */
     
-    /* There are two mutexes in each sandbox object, one for accessing the stat
-     * / status / result of the sandbox (i.e. psbox->mutex) and the other for 
-     * manipulating the controller (i.e. psbox->ctrl.mutex). To avoid racing 
-     * conditions among monitors, the *specified* order to lock the two mutexes
-     * is to first lock the controller then the sandbox itself. */    
-    
-    P(&psbox->ctrl.mutex);
-    P(&psbox->mutex);
-    
-    /* Create all monitoring threads */
-    pthread_t tid[SBOX_MONITOR_MAX] = {0};
-    int cnt = 0, i;
-    for (i = 0; i < SBOX_MONITOR_MAX; i++)
-    {
-        if (psbox->ctrl.monitor[i] == NULL)
-        {
-            continue;
-        }
-        if (pthread_create(&tid[cnt], NULL, psbox->ctrl.monitor[i], 
-            (void *)psbox) != 0)
-        {
-            WARN("failed to create monitoring thread at %p",
-                psbox->ctrl.monitor[i]);
-            continue; /* continue to create the rest monitoring threads */
-        }
-        DBUG("created monitoring thread #%d at %p", cnt, psbox->ctrl.monitor[i]);
-        ++cnt;
-    }
-    DBUG("created %d monitoring threads", cnt);
+    LOCK(psbox, EX);
     
     /* Fork the prisoner process */
     psbox->ctrl.pid = fork();
@@ -410,53 +329,86 @@ sandbox_execute(sandbox_t * psbox)
     if (psbox->ctrl.pid == 0)
     {
         DBUG("entering: the prisoner process");
-        V(&psbox->mutex);
-        V(&psbox->ctrl.mutex);
+        UNLOCK(psbox);
         /* Start executing the targeted program */
         _exit(__sandbox_task_execute(&psbox->task));
     }
     
-    /* Start executing the tracing thread */
+    /* Create all monitor threads */
+    int all, i;
+    for (i = all = 0; i < (SBOX_MONITOR_MAX); i++)
+    {
+        if (psbox->ctrl.monitor[i].target == NULL)
+        {
+            continue;
+        }
+        if (pthread_create(&psbox->ctrl.monitor[i].tid, NULL, 
+            psbox->ctrl.monitor[i].target, (void *)psbox) != 0)
+        {
+            WARN("failed to create monitor thread at %p",
+                psbox->ctrl.monitor[i].target);
+            psbox->ctrl.monitor[i].target = NULL;
+            continue; /* continue to create the rest monitor threads */
+        }
+        ++all;
+        DBUG("created: monitor thread #%d at %p", all, 
+            psbox->ctrl.monitor[i].target);
+    }
+    DBUG("created: %d monitor threads", all);
+    
+    /* Save current thread id */
+    psbox->ctrl.tracer.tid = pthread_self();
+    
+    /* Start executing the main tracer thread */
     if (psbox->ctrl.pid > 0)
     {
         DBUG("forked the prisoner process as pid %d", psbox->ctrl.pid);
-        psbox->ctrl.tid = pthread_self();
-        V(&psbox->mutex);
-        V(&psbox->ctrl.mutex);
-        UPDATE_RESULT(psbox, S_RESULT_PD);
-        UPDATE_STATUS(psbox, S_STATUS_BLK);
-        psbox->ctrl.tracer(psbox);
+        __UPDATE_RESULT(psbox, S_RESULT_PD);
+        __UPDATE_STATUS(psbox, S_STATUS_BLK);
+        UNLOCK(psbox);
+        psbox->ctrl.tracer.target(psbox);
     }
     else
     {
         WARN("error forking the prisoner process");
-        V(&psbox->mutex);
-        V(&psbox->ctrl.mutex);
-        UPDATE_RESULT(psbox, S_RESULT_IE);
-        UPDATE_STATUS(psbox, S_STATUS_FIN);
+        __UPDATE_RESULT(psbox, S_RESULT_IE);
+        __UPDATE_STATUS(psbox, S_STATUS_FIN);
+        UNLOCK(psbox);
     }
     
-    /* Join all monitoring threads */
-    for (i = 0; i < cnt; i++)
+    /* Join all monitor threads */
+    int idx, cnt;
+    for (i = idx = cnt = 0; i < (SBOX_MONITOR_MAX); i++)
     {
-        if (pthread_join(tid[i], NULL) != 0)
+        if (psbox->ctrl.monitor[i].target == NULL)
         {
-            WARN("failed to join monitoring thread #%d", i);
-            if (pthread_cancel(tid[i]) != 0)
+            continue;
+        }
+        ++idx;
+        /* Final notification for the monitor thread to quit */
+        pthread_kill(psbox->ctrl.monitor[i].tid, SIGEXIT);
+        if (pthread_join(psbox->ctrl.monitor[i].tid, NULL) != 0)
+        {
+            WARN("failed to join monitor thread #%d", idx);
+            if (pthread_cancel(psbox->ctrl.monitor[i].tid) != 0)
             {
-                WARN("failed to cancel the %dth monitoring thread", i);
-                continue; /* continue to join the rest monitoring threads */
+                WARN("failed to cancel the %dth monitor thread", idx);
+                continue; /* continue to join the rest monitor threads */
             }
         }
+        ++cnt;
     }
-    DBUG("joined %d of %d monitoring threads", i, cnt);
+    DBUG("joined %d of %d monitor threads", cnt, all);
     
+#ifdef WITH_TRACE_POOL
+#else
     /* Restore old signal mask */
-    if (pthread_sigmask(SIG_SETMASK, &oldset, NULL) != 0)
+    if (pthread_sigmask(SIG_SETMASK, &oldmask, NULL) != 0)
     {
         WARN("pthread_sigmask");
     }
     DBUG("restored old signal mask");
+#endif /* WITH_TRACE_POOL */
     
     FUNC_RET("%p", &psbox->result);
 }
@@ -645,7 +597,7 @@ __sandbox_task_execute(task_t * ptask)
     /* Run the prisoner process in a separate process group */
     if (setsid() < 0)
     {
-        WARN("failed setting session id");
+        WARN("failed to set session id");
         return EXIT_FAILURE;
     }
     
@@ -664,21 +616,21 @@ __sandbox_task_execute(task_t * ptask)
     
     if (dup2(ptask->efd, STDERR_FILENO) < 0)
     {
-        WARN("failed redirecting error channel");
+        WARN("failed to redirect error channel");
         return EXIT_FAILURE;
     }
     DBUG("dup2: %d->%d", ptask->efd, STDERR_FILENO);
     
     if (dup2(ptask->ofd, STDOUT_FILENO) < 0)
     {
-        WARN("failed redirecting output channel(s)");
+        WARN("failed to redirect output channel(s)");
         return EXIT_FAILURE;
     }
     DBUG("dup2: %d->%d", ptask->ofd, STDOUT_FILENO);
     
     if (dup2(ptask->ifd, STDIN_FILENO) < 0)
     {
-        WARN("failed redirecting input channel(s)");
+        WARN("failed to redirect input channel(s)");
         return EXIT_FAILURE;
     }
     DBUG("dup2: %d->%d", ptask->ifd, STDIN_FILENO);
@@ -689,12 +641,12 @@ __sandbox_task_execute(task_t * ptask)
     {
         if (chdir(ptask->jail) < 0)
         {
-            WARN("failed switching to jail directory");
+            WARN("failed to chdir() to jail directory");
             return EXIT_FAILURE;
         }
         if (chroot(".") < 0)
         {
-            WARN("failed chroot to jail directory");
+            WARN("failed to chroot() to jail directory");
             return EXIT_FAILURE;
         }
         DBUG("jail: \"%s\"", ptask->jail);
@@ -704,14 +656,14 @@ __sandbox_task_execute(task_t * ptask)
     
     if (setgid(ptask->gid) < 0)
     {
-        WARN("changing group identity");
+        WARN("failed to change group identity");
         return EXIT_FAILURE;
     }
     DBUG("setgid: %lu", (unsigned long)ptask->gid);
     
     if (setuid(ptask->uid) < 0)
     {
-        WARN("changing owner identity");
+        WARN("failed to change owner identity");
         return EXIT_FAILURE;
     }
     DBUG("setuid: %lu", (unsigned long)ptask->uid);
@@ -719,7 +671,7 @@ __sandbox_task_execute(task_t * ptask)
     /* Prepare argument array to be passed to execve() */
     char * argv[SBOX_ARG_MAX] = {NULL};
     int argc = 0;
-    while ((argc + 1 < SBOX_ARG_MAX) && (ptask->comm.args[argc] >= 0))
+    while ((argc + 1 < (SBOX_ARG_MAX)) && (ptask->comm.args[argc] >= 0))
     {
         argv[argc] = ptask->comm.buff + ptask->comm.args[argc];
         argc++;
@@ -740,9 +692,9 @@ __sandbox_task_execute(task_t * ptask)
 #endif /* NDEBUG */
     
     /* Unblock all signals for the prisoner process. */
-    sigset_t sigset;
-    sigfillset(&sigset);
-    if (pthread_sigmask(SIG_UNBLOCK, &sigset, NULL) != 0)
+    sigset_t sigmask;
+    sigfillset(&sigmask);
+    if (pthread_sigmask(SIG_UNBLOCK, &sigmask, NULL) != 0)
     {
         WARN("pthread_sigmask");
         return EXIT_FAILURE;
@@ -758,13 +710,13 @@ __sandbox_task_execute(task_t * ptask)
     /* Do NOT produce core dump files at all. */
     if (getrlimit(RLIMIT_CORE, &rlimval) != 0)
     {
-        WARN("getting RLIMIT_CORE");
+        WARN("failed to getrlimit(RLIMIT_CORE)");
         return EXIT_FAILURE;
     }
     rlimval.rlim_cur = 0;
     if (setrlimit(RLIMIT_CORE, &rlimval) != 0)
     {
-        WARN("setting RLIMIT_CORE");
+        WARN("failed to setrlimit(RLIMIT_CORE)");
         return EXIT_FAILURE;
     }
     DBUG("RLIMIT_CORE: %ld", rlimval.rlim_cur);
@@ -772,13 +724,13 @@ __sandbox_task_execute(task_t * ptask)
     /* Disk quota (bytes) */
     if (getrlimit(RLIMIT_FSIZE, &rlimval) != 0)
     {
-        WARN("getting RLIMIT_FSIZE");
+        WARN("failed to getrlimit(RLIMIT_FSIZE)");
         return EXIT_FAILURE;
     }
     rlimval.rlim_cur = ptask->quota[S_QUOTA_DISK];
     if (setrlimit(RLIMIT_FSIZE, &rlimval) != 0)
     {
-        WARN("setting RLIMIT_FSIZE");
+        WARN("failed to setrlimit(RLIMIT_FSIZE)");
         return EXIT_FAILURE;
     }
     DBUG("RLIMIT_FSIZE: %ld", rlimval.rlim_cur);
@@ -806,22 +758,22 @@ __sandbox_task_execute(task_t * ptask)
     itv.it_value.tv_usec = (ptask->quota[S_QUOTA_CPU] % 1000) * 1000;
     if (setitimer(ITIMER_PROF, &itv, NULL) < 0)
     {
-        WARN("setting ITIMER_PROF");
+        WARN("failed to setitimer(ITIMER_PROF)");
         return EXIT_FAILURE;
     }
 #endif /* DELETED */
     
-    /* Enter tracing mode */
-    if (!trace_self())
+    /* Mark current process as traced */
+    if (!trace_me())
     {
-        WARN("trace_self");
+        WARN("trace_me");
         return EXIT_FAILURE;
     }
     
     /* Execute the targeted program */
     if (execve(argv[0], argv, NULL) != 0)
     {
-        WARN("execve failed unexpectedly");
+        WARN("execve() failed unexpectedly");
         return errno;
     }
     
@@ -859,16 +811,12 @@ __sandbox_ctrl_init(ctrl_t * pctrl, thread_func_t tft)
     assert(pctrl && tft);
     
     memset(pctrl, 0, sizeof(ctrl_t));
-    pthread_mutex_init(&pctrl->mutex, NULL);
     
-    P(&pctrl->mutex);
-    pthread_cond_init(&pctrl->sched, NULL);
     pctrl->policy.entry = (void *)sandbox_default_policy;
     pctrl->policy.data = 0L;
-    memset(pctrl->monitor, 0, (SBOX_MONITOR_MAX) * sizeof(thread_func_t));
-    pctrl->tracer = tft;
-    _QUEUE_CLEAR(pctrl);
-    V(&pctrl->mutex);
+    memset(pctrl->monitor, 0, (SBOX_MONITOR_MAX) * sizeof(worker_t));
+    pctrl->tracer.target = tft;
+    __QUEUE_CLEAR(pctrl);
     
     PROC_END();
 }
@@ -879,14 +827,9 @@ __sandbox_ctrl_fini(ctrl_t * pctrl)
     PROC_BEGIN("%p", pctrl);
     assert(pctrl);
     
-    P(&pctrl->mutex);
-    _QUEUE_CLEAR(pctrl);
-    pctrl->tracer = NULL;
-    memset(pctrl->monitor, 0, (SBOX_MONITOR_MAX) * sizeof(thread_func_t));
-    pthread_cond_destroy(&pctrl->sched);
-    V(&pctrl->mutex);
-    
-    pthread_mutex_destroy(&pctrl->mutex);
+    __QUEUE_CLEAR(pctrl);
+    pctrl->tracer.target = NULL;
+    memset(pctrl->monitor, 0, (SBOX_MONITOR_MAX) * sizeof(worker_t));
     
     PROC_END();
 }
@@ -897,470 +840,65 @@ __sandbox_ctrl_add_monitor(ctrl_t * pctrl, thread_func_t tfm)
     FUNC_BEGIN("%p,%p", pctrl, tfm);
     assert(pctrl && tfm);
     
-    P(&pctrl->mutex);
     int i;
     for (i = 0; i < (SBOX_MONITOR_MAX); i++)
     {
-        if (pctrl->monitor[i] == NULL)
+        if (pctrl->monitor[i].target == NULL)
         {
-            pctrl->monitor[i] = tfm;
+            pctrl->monitor[i].target = tfm;
             break;
         }
     }
-    pthread_cond_broadcast(&pctrl->sched);
-    V(&pctrl->mutex);
     
     FUNC_RET("%d", i);
 }
 
-static void *
-__sandbox_profiler(sandbox_t * psbox)
+void *
+sandbox_watcher(sandbox_t * psbox)
 {
     MONITOR_BEGIN(psbox);
-    
-    /* Temporary variables */
-    ctrl_t * pctrl = &psbox->ctrl;
-    pid_t pid = pctrl->pid;
-    struct timespec ts;
-    
-    /* Get wallclock start time */
-    if (clock_gettime(CLOCK_REALTIME, &ts) != 0)
-    {
-        WARN("failed getting wallclock start time");
-        POST_EVENT(psbox, _ERROR, errno, pthread_self());
-        MONITOR_END(psbox);
-    }
-    
-    P(&psbox->mutex);
-    psbox->stat.started = ts;
-    V(&psbox->mutex);
-    
-    /* Profiling is by means of sampling the cpu clock time of the prisoner 
-     * process at a relatively high frequency, i.e. 1kHz, and raise an out-of-
-     * quota (cpu) event as soon as it happens. The profiling timer will emit
-     * RT_SIGPROF signals to the profiler thread. */
-    
-    struct itimerspec its;
-    struct sigevent sev;
-    
-    timer_t sw_timer;           /* stop-watch timer */
-    timer_t pf_timer;           /* profiling timer */
-    
-    /* Stop-watch timer for updating elapsed time and raising out-of-quota
-     * (wallclock and memory) events. */
-    
-    its.it_interval.tv_sec = 0;
-    its.it_interval.tv_nsec = ms2ns(200);
-    its.it_value.tv_sec = 0;
-    its.it_value.tv_nsec = ms2ns(200);
-    
-    memset(&sev, 0, sizeof(struct sigevent));
-    sev.sigev_value.sival_ptr = &sw_timer;
-    sev.sigev_signo = RT_SIGSTAT;
-    sev.sigev_notify = SIGEV_SIGNAL;
-    
-    if (timer_create(CLOCK_REALTIME, &sev, &sw_timer) != 0)
-    {
-        WARN("failed creating stop-watch timer");
-        POST_EVENT(psbox, _ERROR, errno, pthread_self());
-        MONITOR_END(psbox);
-    }
-    
-    if (timer_settime(sw_timer, 0, &its, NULL) != 0)
-    {
-        WARN("failed setting up stop-watch timer");
-        POST_EVENT(psbox, _ERROR, errno, pthread_self());
-        MONITOR_END(psbox);
-    }
-    
-    DBUG("started stop-watch timer at 5Hz");
-    
-    /* Obtain the cpu clock id of the prisoner process */
-    clockid_t clockid;
-    if (clock_getcpuclockid(pid, &clockid) != 0)
-    {
-        WARN("failed getting prisoner's cpu clock id");
-        kill(-pid, SIGKILL);
-        /* Do NOT post event here because the prisoner proceess may
-         * have gone making the clock invalid. */
-        MONITOR_END(psbox);
-    }
-    
-    /* Profiling timer for emitting RT_SIGPROF signals. The timer will fire 
-     * periodically at a freq of PROF_FREQ (Hz). At a freq of 0.25kHz, the cpu 
-     * clock of the prisoner process is sampled once every 4msec, and the time
-     * accuracy of profiling is expected to be within 10msec. After the first 
-     * out-of-quota (cpu) event, the profiling timer will be slowed down by a 
-     * factor of PROF_FACTOR to avoid jamming the event queue. */
-    
-    #define PROF_FREQ 250 /* 0.25kHz */
-    #define PROF_FACTOR 250 /* 250x */
-    
-    its.it_interval.tv_sec = 0;
-    its.it_interval.tv_nsec = ms2ns(1000) / PROF_FREQ;
-    its.it_value.tv_sec = 0;
-    its.it_value.tv_nsec = ms2ns(10); /* warmup time */
-    
-    memset(&sev, 0, sizeof(struct sigevent));
-    sev.sigev_value.sival_ptr = &pf_timer;
-    sev.sigev_signo = RT_SIGPROF;
-    sev.sigev_notify = SIGEV_SIGNAL;
-    
-    if (timer_create(CLOCK_REALTIME, &sev, &pf_timer) != 0)
-    {
-        WARN("failed creating profiling timer");
-        POST_EVENT(psbox, _ERROR, errno, pthread_self());
-        MONITOR_END(psbox);
-    }
-    
-    if (timer_settime(pf_timer, 0, &its, NULL) != 0)
-    {
-        WARN("failed setting up profiling timer");
-        POST_EVENT(psbox, _ERROR, errno, pthread_self());
-        MONITOR_END(psbox);
-    }
-    
-    DBUG("started profiling timer at %dHz", PROF_FREQ);
-    
-    /* Wait and handle signals */
-    
-    proc_t proc = {0};
-    proc_bind(psbox, &proc);
-    
-    sigset_t sigset;
-    sigfillset(&sigset);
-    sigdelset(&sigset, SIGCHLD);
-    sigdelset(&sigset, SIGPWR);
-    sigdelset(&sigset, SIGWINCH);
-    sigdelset(&sigset, SIGURG);
-    
-    P(&psbox->mutex);
-    while (!IS_FINISHED(psbox))
-    {
-        V(&psbox->mutex);
-        
-        int signo;
-        siginfo_t siginfo;
-        if ((signo = sigwaitinfo(&sigset, &siginfo)) < 0)
-        {
-            WARN("failed waiting for signals");
-            goto check_status;
-        }
-        
-        if (signo == RT_SIGPROF)
-        {
-            /* Sample the cpu clock time of the prisoner process */
-            if (clock_gettime(clockid, &ts) != 0)
-            {
-                WARN("failed getting prisoner's cpu clock time");
-                kill(-pid, SIGKILL);
-                /* Do NOT post event here because the prisoner proceess may
-                 * have gone making the clock invalid. */
-                goto check_status;
-            }
-            /* Update sandbox stat with the sampled data */
-            P(&psbox->mutex);
-            psbox->stat.cpu_info.clock = ts;
-            if ((res_t)ts2ms(ts) > psbox->task.quota[S_QUOTA_CPU])
-            {
-                DBUG("cpu quota exceeded");
-                V(&psbox->mutex);
-                /* NOTE: unlock the sandbox before posting events */
-                POST_EVENT(psbox, _QUOTA, S_QUOTA_CPU);
-                /* Slow down profiling timer after the first out-of-quota (cpu)
-                 * event. This is to avoid jaming the event queue in case the
-                 * use-specified policy module ignores out-of-quota events. */
-                its.it_interval.tv_nsec = ms2ns(1000) / PROF_FREQ * PROF_FACTOR;
-                its.it_interval.tv_sec = 0;
-                its.it_value.tv_sec = 0;
-                its.it_value.tv_nsec = 0;
-                timer_settime(pf_timer, 0, &its, NULL);
-            }
-            else
-            {
-                V(&psbox->mutex);
-            }
-            goto check_status;
-        }
-        
-        if (signo == RT_SIGSTAT)
-        {
-            /* Collect stat of prisoner process */        
-            if (!proc_probe(pid, PROBE_STAT, &proc))
-            {
-                WARN("failed to probe process: %d", pid);
-                /* Do NOT post event here because the prisoner proceess may
-                 * have gone making the procfs entry invalid. */
-                kill(-pid, SIGKILL);
-                goto check_status;
-            }
-            
-            P(&psbox->mutex);
-
-            /* cpu_info */
-            #define CPU_UPDATE(a,x) \
-            {{{ \
-                ((a).tv_sec) = ((((x).tv_sec) > ((a).tv_sec)) ? \
-                                ((x).tv_sec) : ((a).tv_sec)); \
-                ((a).tv_nsec) = (((((x).tv_sec) > ((a).tv_sec)) || \
-                                  (((((x).tv_sec) == ((a).tv_sec))) && \
-                                   ((((x).tv_nsec) > ((a).tv_nsec))))) ? \
-                                 ((x).tv_nsec) : ((a).tv_nsec)); \
-            }}} /* CPU_UPDATE */
-            
-            CPU_UPDATE(psbox->stat.cpu_info.utime, proc.utime);
-            CPU_UPDATE(psbox->stat.cpu_info.stime, proc.stime);
-            
-            /* mem_info */
-            #define MEM_UPDATE(a,b) \
-            {{{ \
-                (a) = (b); \
-                (a ## _peak) = (((a ## _peak) > (a)) ? (a ## _peak) : (a)); \
-            }}} /* MEM_UPDATE */
-            
-            MEM_UPDATE(psbox->stat.mem_info.vsize, proc.vsize);
-            MEM_UPDATE(psbox->stat.mem_info.rss, proc.rss * getpagesize());
-            psbox->stat.mem_info.minflt = proc.minflt;
-            psbox->stat.mem_info.majflt = proc.majflt;
-            
-            /* Compare memory usage against quota limit, raise out-of-quota 
-             * (memory) event when necessary. */
-            if (psbox->stat.mem_info.vsize_peak > \
-                psbox->task.quota[S_QUOTA_MEMORY])
-            {
-                DBUG("memory quota exceeded");
-                V(&psbox->mutex);
-                /* NOTE: unlock the sandbox before posting events */
-                POST_EVENT(psbox, _QUOTA, S_QUOTA_MEMORY);
-            }
-            else
-            {
-                V(&psbox->mutex);
-            }
-            
-            /* Update the elapsed time stat of sandbox, raise out-of-quota
-             * (wallclock) event when occured. */
-            if (clock_gettime(CLOCK_REALTIME, &ts) != 0)
-            {
-                WARN("failed getting wallclock elapsed time");
-                /* NOTE: unlock the sandbox before posting events */
-                POST_EVENT(psbox, _ERROR, errno, pthread_self());
-                goto check_status;
-            }
-            
-            P(&psbox->mutex);
-            
-            TS_SUBTRACT(ts, psbox->stat.started);
-            psbox->stat.elapsed = ts;
-            
-            /* Compare elapsed time against quota limit, raise out-of-quota 
-             * (wallclock) event when necessary. */
-            if ((res_t)ts2ms(psbox->stat.elapsed) > 
-                psbox->task.quota[S_QUOTA_WALLCLOCK])
-            {
-                DBUG("wallclock quota exceeded");
-                V(&psbox->mutex);
-                /* NOTE: unlock the sandbox before posting events */
-                POST_EVENT(psbox, _QUOTA, S_QUOTA_WALLCLOCK);
-            }
-            else
-            {
-                V(&psbox->mutex);
-            }
-            
-            goto check_status;
-        }
-        
-        if (signo == RT_SIGQUIT)
-        {
-            /* Do not exit the profiling loop immediately. Instead, go back to 
-             * the front to verify if the tracer thread is already finished. */
-            DBUG("received quit signal %d", signo);
-            goto check_status;
-        }
-        
-        switch (signo)
-        {
-        case SIGTERM:
-        case SIGINT:
-        case SIGQUIT:
-            /* These signals are redirected to the prisoner process. This allows
-             * shell programs running libsandbox to respond to user emitted
-             * signals such as <Ctrl> + C (i.e. SIGINT). */
-            DBUG("received terminate signal %d", signo);
-            kill(-pid, signo);
-            break;
-        default:
-            /* When the process running libsandbox is to be terminated by an 
-             * unexpected signal, try to terminate the prisoner process first.
-             * But since this is not the fault of the prisoner process, an
-             * internal error event is raised. */
-            DBUG("received unexpected signal %d", signo);
-            POST_EVENT(psbox, _ERROR, EINTR, pthread_self(), signo);
-            kill(-pid, SIGKILL);
-            break;
-        }
-        
-check_status:
-        P(&psbox->mutex);
-        continue;
-    }
-    V(&psbox->mutex);
-    
-    timer_delete(sw_timer);
-    timer_delete(pf_timer);
-    
-    /* Wait until the the result is decided. In the meanwhile, wake up other 
-     * monitors so that they can exit respective monitoring loop as well.  */
-    FLUSH_ALL_EVENTS(psbox);
-    
-    MONITOR_END(psbox);
-}
-
-static void *
-__sandbox_watcher(sandbox_t * psbox)
-{
-    MONITOR_BEGIN(psbox);
-    
-    UPDATE_RESULT(psbox, S_RESULT_PD);
-    
-    /* Temporary variables */
-    ctrl_t * pctrl = &psbox->ctrl;
-    proc_t proc = {0};
-    proc_bind(psbox, &proc);
-    
-    /* Wait and handle events */
-    P(&pctrl->mutex);
-    P(&psbox->mutex);
-    while (!HAS_RESULT(psbox))
-    {
-        /* Exit the watching loop if a) the tracer is already finished, and b) 
-         * there are no pending events to be handled */
-        if (IS_FINISHED(psbox) && _QUEUE_EMPTY(pctrl))
-        {
-            /* All (potential) events should have been handled. If the result 
-             * is still NOT decided, then it is the fault of the policy. */
-            if (!HAS_RESULT(psbox))
-            {
-                _UPDATE_RESULT(psbox, S_RESULT_BP);
-            }
-            DBUG("exiting the watching loop");
-            break;
-        }
-        V(&psbox->mutex);
-        
-        /* An event might have already been posted */
-        if (_QUEUE_EMPTY(pctrl))
-        {
-            pthread_cond_wait(&pctrl->sched, &pctrl->mutex);
-            if (_QUEUE_EMPTY(pctrl))
-            {
-                P(&psbox->mutex);
-                continue;
-            }
-        }
-        
-        /* Start investigating the event */
-        DBUG("detected event: %s {%lu %lu %lu %lu %lu %lu %lu}",
-            s_event_type_name(_QUEUE_FRONT(pctrl).type),
-            _QUEUE_FRONT(pctrl).data.__bitmap__.A,
-            _QUEUE_FRONT(pctrl).data.__bitmap__.B,
-            _QUEUE_FRONT(pctrl).data.__bitmap__.C,
-            _QUEUE_FRONT(pctrl).data.__bitmap__.D,
-            _QUEUE_FRONT(pctrl).data.__bitmap__.E,
-            _QUEUE_FRONT(pctrl).data.__bitmap__.F,
-            _QUEUE_FRONT(pctrl).data.__bitmap__.G);
-        
-        /* Consult the sandbox policy to determine next action */
-        ((policy_entry_t)pctrl->policy.entry)(&pctrl->policy, \
-            &(_QUEUE_FRONT(pctrl)), &pctrl->action);
-        
-        DBUG("policy decided action: %s {%lu %lu}",
-            s_action_type_name(pctrl->action.type),
-            pctrl->action.data.__bitmap__.A,
-            pctrl->action.data.__bitmap__.B);
-        
-        /* Perform the decided action */
-        P(&psbox->mutex);
-        
-        /* Drop the obsoleted event and notify other threads about this */
-        _QUEUE_POP(pctrl);
-        pthread_cond_broadcast(&pctrl->sched);
-        
-        switch (pctrl->action.type)
-        {
-        case S_ACTION_CONT:
-            break;
-        case S_ACTION_FINI:
-            /* Terminate the prisoner process */
-            trace_kill(&proc, SIGKILL);
-            _UPDATE_RESULT(psbox, pctrl->action.data._FINI.result);
-            break;
-        default:
-        case S_ACTION_KILL:
-            /* Terminate the prisoner process */
-            trace_kill(&proc, SIGKILL);
-            _UPDATE_RESULT(psbox, pctrl->action.data._KILL.result);
-            break;
-        }
-    }
-    V(&psbox->mutex);
-    V(&pctrl->mutex);
-    
-    /* Wake up other monitors and let them know that the result is already 
-     * decided, so that they can exit respective monitoring loop as well.  */
-    FLUSH_ALL_EVENTS(psbox);
-    
-    MONITOR_END(psbox);
-}
-
-static void *
-__sandbox_tracer(sandbox_t * psbox)
-{
-    MONITOR_BEGIN(psbox);
-    
-    UPDATE_STATUS(psbox, S_STATUS_EXE);
     
     /* Temporary variables. */
-    pid_t self = getpid();
-    pid_t pid = psbox->ctrl.pid;
+    LOCK(psbox, SH);
+    const pthread_t profiler = psbox->ctrl.monitor[0].tid;
+    const pid_t pid = psbox->ctrl.pid;
+    ctrl_t * const pctrl = &psbox->ctrl;
+    proc_t proc = {0};
+    proc_bind(psbox, &proc);
+    UNLOCK(psbox);
+    
     siginfo_t w_info;
     int w_opt = WEXITED | WSTOPPED;
     int w_res = 0;
-    proc_t proc = {0};
-    proc_bind(psbox, &proc);
     long sc_stack[8] = {0};
     int sc_top = 0;
-    
-    /* Make an initial wait to verify the first system call. */
-    if ((w_res = waitid(P_PID, pid, &w_info, w_opt)) < 0)
-    {
-        WARN("waitid");
-        POST_EVENT(psbox, _ERROR, errno, pthread_self());
-        kill(-pid, SIGKILL);
-    }
     
     /* Clear cache in order to increase timing accuracy */
     cache_flush();
     
-    /* Entering the tracing loop */
-    do
+    /* Entering the watching loop */
+    while ((w_res = waitid(P_PID, pid, &w_info, w_opt)) >= 0)
     {
-        /* Trace state refresh of the prisoner process */
+        DBUG("---------------------------------------------------------------");
+        DBUG("waitid(%d,%d,%p,%d): %d", P_PID, pid, &w_info, w_opt, w_res);
+        
         UPDATE_STATUS(psbox, S_STATUS_BLK);
-
-        /* Obtain signal info of prisoner process */
+        
+        /* Obtain signal info of the prisoner process */
         if (!proc_probe(pid, PROBE_SIGINFO, &proc))
         {
-            WARN("failed to probe process: %d", pid);
-            kill(-pid, SIGKILL);
-        }
-        
-        /* Notify the profiler thread to examine stat */
-        if (kill(self, RT_SIGSTAT) != 0)
-        {
-            WARN("failed to notify the profiler thread");
-            kill(-pid, SIGKILL);
+            MONITOR_ERROR(psbox, "failed to probe process: %d", pid);
+            LOCK(psbox, SH);
+            if (HAS_RESULT(psbox))
+            {
+                DBUG("exiting the watching loop");
+                UNLOCK(psbox);
+                break;
+            }
+            else
+            {
+                UNLOCK(psbox);
+            }
         }
         
         /* Raise appropriate events judging each wait status */
@@ -1390,35 +928,33 @@ __sandbox_tracer(sandbox_t * psbox)
                 POST_EVENT(psbox, _QUOTA, S_QUOTA_DISK);
                 break;
             case SIGTRAP:
-                /* Collect additional info of prisoner process */
+                /* Collect additional info of the prisoner process */
                 if (!proc_probe(pid, PROBE_REGS | PROBE_OP, &proc))
                 {
-                    WARN("failed to probe process: %d", pid);
-                    kill(-pid, SIGKILL);
+                    MONITOR_ERROR(psbox, "failed to probe process: %d", pid);
                     break;
                 }
-                /* Inspect opcode and tracing flags to see if the SIGTRAP
-                 * signal was due to a system call invocation or return. The 
-                 * subtleties are wrapped in the IS_SYSCALL and IS_SYSRET 
-                 * macros defined in <platform.h> */
+                /* Inspect opcode and tflags to see if the SIGTRAP signal was 
+                 * due to a system call invocation or return. The subtleties are
+                 * wrapped in the IS_SYSCALL and IS_SYSRET macros. */
                 if (IS_SYSCALL(&proc) || IS_SYSRET(&proc))
                 {
                     long sc = THE_SYSCALL(&proc);
                     
-                    P(&psbox->mutex);
+                    LOCK(psbox, EX);
                     psbox->stat.syscall = sc;
-                    V(&psbox->mutex);
+                    UNLOCK(psbox);
                     
                     if (sc != sc_stack[sc_top])
                     {
                         SET_IN_SYSCALL(&proc);
                         sc_stack[++sc_top] = sc;
                         POST_EVENT(psbox, _SYSCALL, sc, SYSCALL_ARG1(&proc),
-                                                        SYSCALL_ARG2(&proc),
-                                                        SYSCALL_ARG3(&proc),
-                                                        SYSCALL_ARG4(&proc),
-                                                        SYSCALL_ARG5(&proc),
-                                                        SYSCALL_ARG6(&proc));
+                                                       SYSCALL_ARG2(&proc),
+                                                       SYSCALL_ARG3(&proc),
+                                                       SYSCALL_ARG4(&proc),
+                                                       SYSCALL_ARG5(&proc),
+                                                       SYSCALL_ARG6(&proc));
                     }
                     else
                     {
@@ -1435,16 +971,16 @@ __sandbox_tracer(sandbox_t * psbox)
                     {
                         goto unknown_signal;
                     }
-                    DBUG("detected post-execve SIGTRAP");
+                    DBUG("detected: post-execve SIGTRAP");
                 }
 #ifdef WITH_SOFTWARE_TSC
 #warning "software tsc is an experimental feature"
                 /* Update the tsc instructions counter */
-                P(&psbox->mutex);
+                LOCK(psbox, EX);
                 psbox->stat.cpu_info.tsc++;
                 DBUG("tsc                         %010llu", \
                     psbox->stat.cpu_info.tsc);
-                V(&psbox->mutex);
+                UNLOCK(psbox);
 #endif /* WITH_SOFTWARE_TSC */
                 break;
             default:            /* Other runtime errors */
@@ -1457,20 +993,18 @@ __sandbox_tracer(sandbox_t * psbox)
         {
             DBUG("wait: signaled (%d)", w_info.si_status);
     unknown_signal:
-            P(&psbox->mutex);
+            LOCK(psbox, EX);
             psbox->stat.signal.signo = w_info.si_status;
             psbox->stat.signal.code = proc.siginfo.si_code;
-            V(&psbox->mutex);
-            /* NOTE: unlock the sandbox before posting events */
+            UNLOCK(psbox);
             POST_EVENT(psbox, _SIGNAL, w_info.si_status, proc.siginfo.si_code);
         }
         else if (w_info.si_code == CLD_EXITED)
         {
             DBUG("wait: exited (%d)", w_info.si_status);
-            P(&psbox->mutex);
+            LOCK(psbox, EX);
             psbox->stat.exitcode = w_info.si_status;
-            V(&psbox->mutex);
-            /* NOTE: unlock the sandbox before posting events */
+            UNLOCK(psbox);
             POST_EVENT(psbox, _EXIT, w_info.si_status);
         }
         else
@@ -1479,21 +1013,57 @@ __sandbox_tracer(sandbox_t * psbox)
             /* unknown event, should not reach here! */
         }
         
-        /* Wait for the watcher to handle all pending events. This is also the 
-         * point for user-specified policy modules to dump / visit the address 
-         * space of the prisoner process using proc_dump(). If the result is 
-         * already decided, this will also exit the tracing loop. */
-        WAIT4_EVENT_HANDLING(psbox, &proc);
+        /* Notify the profiler thread to collect and examine stat */
+        pthread_kill(profiler, SIGSTAT);
         
-        /* Hack the prisoner process to ensure safe tracing. This includes 
-         * modifying some system call parameters / return values and flipping 
-         * tracing flags of the proc structure defined in <platform.h>. */
-        if (!trace_hack(&proc))
+        /* Deliver pending events to the policy module for investigation */
+        LOCK(psbox, SH);
+        while (!__QUEUE_EMPTY(pctrl))
         {
-            WARN("failed hacking the prisoner process");
-            kill(-pid, SIGKILL);
-            /* Do NOT post event here as the prisoner process may have gone. */
+            /* Start investigating the event */
+            DBUG("detected: event %s {%lu %lu %lu %lu %lu %lu %lu}",
+                s_event_type_name(__QUEUE_HEAD(pctrl).type),
+                __QUEUE_HEAD(pctrl).data.__bitmap__.A,
+                __QUEUE_HEAD(pctrl).data.__bitmap__.B,
+                __QUEUE_HEAD(pctrl).data.__bitmap__.C,
+                __QUEUE_HEAD(pctrl).data.__bitmap__.D,
+                __QUEUE_HEAD(pctrl).data.__bitmap__.E,
+                __QUEUE_HEAD(pctrl).data.__bitmap__.F,
+                __QUEUE_HEAD(pctrl).data.__bitmap__.G);
+        
+            /* Consult the sandbox policy to determine next action */
+            ((policy_entry_t)pctrl->policy.entry)(&pctrl->policy, \
+                &(__QUEUE_HEAD(pctrl)), &pctrl->action);
+        
+            DBUG("policy decided action: %s {%lu %lu}",
+                s_action_type_name(pctrl->action.type),
+                pctrl->action.data.__bitmap__.A,
+                pctrl->action.data.__bitmap__.B);
+            
+            /* Perform the desired action */
+            RELOCK(psbox, EX);
+            switch (pctrl->action.type)
+            {
+            case S_ACTION_CONT:
+                /* Drop the obsoleted event */
+                __QUEUE_POP(pctrl);
+                break;
+            case S_ACTION_FINI:
+                /* Terminate the prisoner process */
+                __UPDATE_RESULT(psbox, pctrl->action.data._FINI.result);
+                __QUEUE_CLEAR(pctrl);
+                trace_kill(&proc, SIGKILL);
+                break;
+            default:
+            case S_ACTION_KILL:
+                __UPDATE_RESULT(psbox, pctrl->action.data._KILL.result);
+                __QUEUE_CLEAR(pctrl);
+                trace_kill(&proc, SIGKILL);
+                break;
+            }
+            RELOCK(psbox, SH);
         }
+        UNLOCK(psbox);
         
         /* Schedule for next trace */
 #ifdef WITH_SOFTWARE_TSC
@@ -1502,27 +1072,33 @@ __sandbox_tracer(sandbox_t * psbox)
         if (!trace_next(&proc, TRACE_SYSTEM_CALL))
 #endif /* WITH_SOFTWARE_TSC */
         {
-            WARN("failed scheduling next trace");
-            kill(-pid, SIGKILL);
-            /* Do NOT post event here as the prisoner process may have gone. */
+            MONITOR_ERROR(psbox, "failed to schedule next watch");
+            LOCK(psbox, SH);
+            if (HAS_RESULT(psbox))
+            {
+                DBUG("exiting the watching loop");
+                UNLOCK(psbox);
+                break;
+            }
+            else
+            {
+                UNLOCK(psbox);
+            }
         }
         
-        /* Wait until the prisoner process is trapped  */
         UPDATE_STATUS(psbox, S_STATUS_EXE);
-        DBUG("---------------------------------------------------------------");
-        DBUG("waitid(%d,%d,%p,%d)", P_PID, pid, &w_info, w_opt);
-    } while ((w_res = waitid(P_PID, pid, &w_info, w_opt)) >= 0);
+    }
     
     UPDATE_STATUS(psbox, S_STATUS_FIN);
     
-    /* Wait until the the result is decided. In the meanwhile, wake up other 
-     * monitors so that they can exit respective monitoring loop as well.  */
-    FLUSH_ALL_EVENTS(psbox);
+    LOCK(psbox, EX);
+    if (!HAS_RESULT(psbox))
+    {
+        __UPDATE_RESULT(psbox, S_RESULT_BP);
+    }
+    UNLOCK(psbox);
     
-    /* Final notification for monitors to exit respective monitoring loops. */
-    kill(self, RT_SIGQUIT);
-    
-    /* Notify trace_main() to return */
+    /* Notify the main tracer thread to return */
     trace_end(&proc);
     
     MONITOR_END(psbox);
@@ -1540,7 +1116,8 @@ sandbox_default_policy(const policy_t * ppolicy, const event_t * pevent,
     case S_EVENT_SYSCALL:
         /* Unsupported system call modes (e.g. 32bit libsandbox observes system
          * calls from the 64bit table) are considered illegal. */
-        if ((unsigned)pevent->data._SYSCALL.scinfo >= MAKE_WORD(0, SCMODE_MAX))
+        if ((unsigned long)pevent->data._SYSCALL.scinfo >= \
+            MAKE_WORD(0, SCMODE_MAX))
         {
             WARN("illegal system call mode");
             *paction = (action_t){S_ACTION_KILL, {{S_RESULT_RF}}};
@@ -1592,7 +1169,16 @@ sandbox_default_policy(const policy_t * ppolicy, const event_t * pevent,
         *paction = (action_t){S_ACTION_KILL, {{S_RESULT_IE}}};
         break;
     case S_EVENT_SIGNAL:
-        *paction = (action_t){S_ACTION_KILL, {{S_RESULT_RT}}};
+        switch (pevent->data._SIGNAL.signo)
+        {
+        case SIGSTOP:
+        case SIGCONT:
+            *paction = (action_t){S_ACTION_CONT};
+            break;
+        default:
+            *paction = (action_t){S_ACTION_KILL, {{S_RESULT_RT}}};
+            break;
+        }
         break;
     case S_EVENT_QUOTA:
         switch (pevent->data._QUOTA.type)
@@ -1616,6 +1202,368 @@ sandbox_default_policy(const policy_t * ppolicy, const event_t * pevent,
     
     PROC_END();
 }
+
+void *
+sandbox_profiler(sandbox_t * psbox)
+{
+    MONITOR_BEGIN(psbox);
+    
+    /* Temporary variables */
+    LOCK(psbox, SH);
+    const pid_t pid = psbox->ctrl.pid;
+    proc_t proc = {0};
+    proc_bind(psbox, &proc);
+    UNLOCK(psbox);
+    
+    /* Profiling is by means of sampling the resource usage of the prisoner 
+     * process at a relatively high frequency, and raise out-of-quota events
+     * as soon as they happen. Other monitor threads may trigger profiling
+     * by sending SIGSTAT signals to the profiler thread. */
+    
+    clockid_t clockid;
+    struct timespec ts;
+    
+    /* Obtain the cpu clock id of the prisoner process */
+    if (clock_getcpuclockid(pid, &clockid) != 0)
+    {
+        MONITOR_ERROR(psbox, "failed to get the prisoner's cpu clock id");
+        MONITOR_END(psbox);
+    }
+    
+    /* Obtain the wallclock start time of the prisoner process */
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+    {
+        MONITOR_ERROR(psbox, "failed to get wallclock start time");
+        MONITOR_END(psbox);
+    }
+    
+    LOCK(psbox, EX);
+    psbox->stat.started = ts;
+    UNLOCK(psbox);
+    
+#ifdef WITH_TRACE_POOL
+#else
+    
+    /* Stop-watch timer for emiting SIGSTAT signals, upon which the profiler
+     * collects and examines elapsed wallclock time and memory usage stat. */
+    
+    timer_t sw_timer = sandbox_timer(SIGSTAT, STAT_FREQ);
+    if (errno != 0)
+    {
+        MONITOR_ERROR(psbox, "failed to create stop-watch timer");
+        MONITOR_END(psbox);
+    }
+    DBUG("created: stop-watch timer at %dHz", STAT_FREQ);
+    
+    /* Profiling timer for emitting SIGPROF signals. The timer will fire 
+     * periodically at a freq of PROF_FREQ (Hz). At a freq of 200Hz, the cpu 
+     * clock of the prisoner process is sampled once every 5msec, and the
+     * accuracy of profiling is expected to be within 10msec. After the first 
+     * out-of-quota (cpu) event, the profiling timer will be stopped. The user-
+     * specified policy module still sees consequent out-of-quota (cpu) events 
+     * triggerred by SIGSTAT, but at a relative low frequency. */
+    
+    timer_t pf_timer = sandbox_timer(SIGPROF, PROF_FREQ);
+    if (errno != 0)
+    {
+        MONITOR_ERROR(psbox, "failed to create profiling timer");
+        MONITOR_END(psbox);
+    }
+    DBUG("created: profiling timer at %dHz", PROF_FREQ);
+    
+#endif /* WITH_TRACE_POOL */
+    
+    /* Wait until the watcher thread has seen the initial SIGTRAP, and that the
+     * prisoner process has mapped in the executable through execve(). This is
+     * essential for correct memory profiling, because in between fork() and
+     * execve(), the memory space of the prisoner process is duplicated from
+     * the process running libsandbox, whose size does not represent the memory
+     * usage of the prisoner process, and may exceed the (mem) quota! */
+    
+    sigset_t sigmask;
+    sigemptyset(&sigmask);
+    sigaddset(&sigmask, SIGEXIT);
+    sigaddset(&sigmask, SIGSTAT);
+    sigaddset(&sigmask, SIGPROF);
+
+#ifdef WITH_TRACE_POOL
+#else
+    sigaddset(&sigmask, SIGTERM);
+    sigaddset(&sigmask, SIGQUIT);
+    sigaddset(&sigmask, SIGINT);
+#endif /* WITH_TRACE_POOL */
+    
+    LOCK_ON_COND(psbox, SH, !IS_BLOCKED(psbox));
+    
+    while (!IS_FINISHED(psbox))
+    {
+        UNLOCK(psbox);
+        
+        int signo;
+        siginfo_t siginfo;  
+        if ((signo = sigwaitinfo(&sigmask, &siginfo)) < 0)
+        {
+            WARN("failed to sigwaitinfo()");
+            goto check_status;
+        }
+        
+        switch (signo)
+        {
+        case SIGSTAT:
+            /* Collect stat of the prisoner process */        
+            if (!proc_probe(pid, PROBE_STAT, &proc))
+            {
+                MONITOR_ERROR(psbox, "failed to probe process: %d", pid);
+                break;
+            }
+            LOCK(psbox, EX);
+            
+            /* cpu_info */
+            #define CPU_UPDATE(a,x) \
+            {{{ \
+                ((a).tv_sec) = ((((x).tv_sec) > ((a).tv_sec)) ? \
+                                ((x).tv_sec) : ((a).tv_sec)); \
+                ((a).tv_nsec) = (((((x).tv_sec) > ((a).tv_sec)) || \
+                                  (((((x).tv_sec) == ((a).tv_sec))) && \
+                                   ((((x).tv_nsec) > ((a).tv_nsec))))) ? \
+                                 ((x).tv_nsec) : ((a).tv_nsec)); \
+            }}} /* CPU_UPDATE */
+            
+            CPU_UPDATE(psbox->stat.cpu_info.utime, proc.utime);
+            CPU_UPDATE(psbox->stat.cpu_info.stime, proc.stime);
+            
+            /* mem_info */
+            #define MEM_UPDATE(a,b) \
+            {{{ \
+                (a) = (b); \
+                (a ## _peak) = (((a ## _peak) > (a)) ? (a ## _peak) : (a)); \
+            }}} /* MEM_UPDATE */
+            
+            MEM_UPDATE(psbox->stat.mem_info.vsize, proc.vsize);
+            MEM_UPDATE(psbox->stat.mem_info.rss, proc.rss * getpagesize());
+            psbox->stat.mem_info.minflt = proc.minflt;
+            psbox->stat.mem_info.majflt = proc.majflt;
+            
+            /* Compare memory usage against quota limit, raise out-of-quota 
+             * (memory) event when necessary. */
+            if (psbox->stat.mem_info.vsize_peak > \
+                psbox->task.quota[S_QUOTA_MEMORY])
+            {
+                DBUG("memory quota exceeded");
+                UNLOCK(psbox);
+                POST_EVENT(psbox, _QUOTA, S_QUOTA_MEMORY);
+                trace_kill(&proc, SIGSTOP);
+                trace_kill(&proc, SIGCONT);
+            }
+            else
+            {
+                UNLOCK(psbox);
+            }
+            
+            /* Update the elapsed time stat of sandbox, raise out-of-quota
+             * (wallclock) event when occured. */
+            if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+            {
+                MONITOR_ERROR(psbox, "failed to get wallclock elapsed time");
+                break;
+            }
+            
+            LOCK(psbox, EX);
+            
+            TS_SUBTRACT(ts, psbox->stat.started);
+            psbox->stat.elapsed = ts;
+            
+            /* Compare elapsed time against quota limit, raise out-of-quota 
+             * (wallclock) event when necessary. */
+            if ((res_t)ts2ms(psbox->stat.elapsed) > 
+                psbox->task.quota[S_QUOTA_WALLCLOCK])
+            {
+                DBUG("wallclock quota exceeded");
+                UNLOCK(psbox);
+                POST_EVENT(psbox, _QUOTA, S_QUOTA_WALLCLOCK);
+                trace_kill(&proc, SIGSTOP);
+                trace_kill(&proc, SIGCONT);
+            }
+            else
+            {
+                UNLOCK(psbox);
+            }
+            /* NOTE: do NOT break here, proceed to cpu clock profiling */
+        case SIGPROF:
+            /* Sample the cpu clock time of the prisoner process */
+            if (clock_gettime(clockid, &ts) != 0)
+            {
+                WARN("failed to get the prisoner's cpu clock time");
+                /* Do NOT raise monitor error here because the prisoner process
+                 * may have gone making the clock invalid. */
+                break;
+            }
+            
+            /* Update sandbox stat with the sampled data */
+            LOCK(psbox, EX);
+            psbox->stat.cpu_info.clock = ts;
+            if ((res_t)ts2ms(ts) > psbox->task.quota[S_QUOTA_CPU])
+            {
+                DBUG("cpu quota exceeded");
+                UNLOCK(psbox);
+                POST_EVENT(psbox, _QUOTA, S_QUOTA_CPU);
+                trace_kill(&proc, SIGSTOP);
+                trace_kill(&proc, SIGCONT);
+#ifdef WITH_TRACE_POOL
+                /* Block the profiling signal upon the first out-of-quota (cpu)
+                 * event. This avoids jamming the event queue in case the user-
+                 * specified policy module ignores out-of-quota events. */
+                sigdelset(&sigmask, SIGPROF);
+#else
+                /* Stop the profiling timer upon the first out-of-quota (cpu)
+                 * event. This avoids jamming the event queue in case the user-
+                 * specified policy module ignores out-of-quota events. */
+                struct itimerspec its;
+                its.it_interval.tv_sec = 0;
+                its.it_interval.tv_nsec = ms2ns(1000 / PROF_FREQ);
+                its.it_value.tv_sec = 0;
+                its.it_value.tv_nsec = 0;
+                timer_settime(pf_timer, 0, &its, NULL);
+#endif /* WITH_TRACE_POOL */
+            }
+            else
+            {
+                UNLOCK(psbox);
+            }
+            break;
+        case SIGEXIT:    
+#ifdef WITH_TRACE_POOL
+            if (siginfo.si_code != SI_QUEUE)
+            {
+                DBUG("termination signal %d", signo);
+                break;
+            }
+            /* Extract the real signal from siginfo */
+            switch (siginfo.si_int)
+            {
+            case SIGTERM:
+            case SIGQUIT:
+            case SIGINT:
+                /* These signals are forwarded to the prisoner process. This
+                 * allows shell programs running libsandbox to respond to user 
+                 * emitted signals such as <Ctrl> + C (i.e. SIGINT). */
+                errno = EINTR;
+                WARN("termination signal %d", siginfo.si_int);
+                trace_kill(&proc, signo);
+                break;
+            default:
+                /* When the process running libsandbox is interrupted by an
+                 * unexpected signal, try to terminate the prisoner process.
+                 * Since this is not the fault of the prisoner process, the 
+                 * signal is reported as a monitor error. */
+                errno = EINTR;
+                MONITOR_ERROR(psbox, "unexpected signal %d", siginfo.si_int);
+                break;
+            }
+#else
+            DBUG("termination signal %d", signo);
+#endif /* WITH_TRACE_POOL */
+            /* Do NOT exit the profiling loop immediately. Instead, go back to
+             * the front to verify if the watcher thread is already finished. */
+            break;
+        }
+
+check_status:
+        LOCK(psbox, SH);
+    }
+    UNLOCK(psbox);
+    
+#ifdef WITH_TRACE_POOL
+#else
+    timer_delete(sw_timer);
+    timer_delete(pf_timer);
+#endif
+    
+    MONITOR_END(psbox);
+}
+
+#ifdef WITH_TRACE_POOL
+
+void *
+sandbox_manager(sandbox_pool_t * const pool)
+{
+    FUNC_BEGIN("%p", pool);
+    assert(pool);
+    
+    /* Stop-watch timer for emiting SIGSTAT signals. The timer will fire
+     * periodically at a freq of STAT_FREQ (Hz), which coordinates the profiler
+     * threads of active sandbox instances to collect resource usage stat. */
+    
+    timer_t sw_timer = sandbox_timer(SIGSTAT, STAT_FREQ);
+    if (errno != 0)
+    {
+        WARN("failed to create stop-watch timer");
+        FUNC_RET("%p", (void *)NULL);
+    }
+    DBUG("created stop-watch timer at %dHz", STAT_FREQ);
+    
+    /* Profiling timer for emitting SIGPROF signals. The timer will fire 
+     * periodically at a freq of PROF_FREQ (Hz), which coordinates the profiler
+     * threads of active sandbox instances to sample the cpu clock time of
+     * respective prisoner processes. At a frequency of 200Hz, the cpu clocks
+     * are sampled once every 5msec, and the accuracy of time profiling is 
+     * expected to be within 10msec on contemporary hardware platforms. */
+    
+    timer_t pf_timer = sandbox_timer(SIGPROF, PROF_FREQ);
+    if (errno != 0)
+    {
+        WARN("failed to create profiling timer");
+        FUNC_RET("%p", (void *)NULL);
+    }
+    DBUG("created profiling timer at %dHz", PROF_FREQ);
+    
+    sigset_t sigmask;
+    sigemptyset(&sigmask);
+    sigaddset(&sigmask, SIGEXIT);
+    sigaddset(&sigmask, SIGSTAT);
+    sigaddset(&sigmask, SIGPROF);
+    sigaddset(&sigmask, SIGTERM);
+    sigaddset(&sigmask, SIGQUIT);
+    sigaddset(&sigmask, SIGINT);
+    
+    bool end = false;
+    while (!end)
+    {
+        int signo;
+        siginfo_t siginfo;
+        if ((signo = sigwaitinfo(&sigmask, &siginfo)) < 0)
+        {
+            WARN("failed to sigwaitinfo()");
+            continue;
+        }
+        
+        if (signo == SIGEXIT)
+        {
+            end = true;
+            signo = SIGKILL;
+        }
+        
+        /* Broadcast signals to active sandbox instances */
+        P(&global_mutex);
+        sandbox_ref_t * item;
+        SLIST_FOREACH(item, pool, entries)
+        {
+            sandbox_notify(item->psbox, signo);
+        }
+        V(&global_mutex);
+    }
+    
+    timer_delete(sw_timer);
+    timer_delete(pf_timer);
+    
+    FUNC_RET("%p", (void *)pool);
+}
+
+sandbox_pool_t sandbox_pool = SLIST_HEAD_INITIALIZER(sandbox_pool);
+
+#endif /* TRACE_POOL */
+
+pthread_mutex_t global_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 #ifdef __cplusplus
 } /* extern "C" */

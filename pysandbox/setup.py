@@ -42,8 +42,8 @@ from glob import glob
 from os.path import join, basename
 
 NAME = 'pysandbox'
-VERSION = "0.3.4"
-RELEASE = "3"
+VERSION = "0.3.5"
+RELEASE = "1"
 AUTHOR = "LIU Yu"
 AUTHOR_EMAIL = "pineapple.liu@gmail.com"
 MAINTAINER = AUTHOR

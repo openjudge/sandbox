@@ -102,10 +102,10 @@ install: $(prefix) $($(LIBRARY)_bdist) src/$(LIBRARY).h
 	$(INSTALL) lib$(LIBRARY).so.$(VERSION) $(libdir)/lib$(LIBRARY).so.$(VERSION)
 	$(LN) lib$(LIBRARY).so.$(VERSION) $(libdir)/lib$(LIBRARY).so
 
-Makefile: Makefile.in config.status
+Makefile: Makefile.in
 	./config.status
 
-src/config.h: src/config.h.in config.status
+src/config.h: src/config.h.in
 	./config.status
 
 config.status: configure

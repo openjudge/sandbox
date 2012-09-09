@@ -33,8 +33,8 @@
 
 %define sbox sandbox
 %define name lib%{sbox}
-%define version 0.3.4
-%define release 3
+%define version 0.3.5
+%define release 1
 
 Summary: The Sandbox Libraries
 Name: %{name}
@@ -57,14 +57,16 @@ Provides: %{name}.so
 %endif
 
 %description
-The sandbox libraries (libsandbox & pysandbox) provide API's in C/C++/Python
-for executing simple (single process) programs in a restricted environment, or
-sandbox. Runtime behaviours of binary executable programs can be captured and
-blocked according to configurable / programmable policies.
+The sandbox libraries (libsandbox & pysandbox) provide API's in C/C++ and
+Python for executing and profiling simple (single process) programs in a
+restricted environment, or sandbox. These API's can help developers to build
+automated profiling tools and watchdogs that capture and block the runtime
+behaviours of binary executable programs according to configurable /
+programmable policies.
 
 %prep
 %setup
-./configure --prefix=%{buildroot}%{_prefix} --libdir=%{buildroot}%{_libdir} --includedir=%{buildroot}%{_includedir}  --enable-chkvsc
+./configure --prefix=%{buildroot}%{_prefix} --libdir=%{buildroot}%{_libdir} --includedir=%{buildroot}%{_includedir}  --enable-chkvsc --enable-pool
 
 %build
 make

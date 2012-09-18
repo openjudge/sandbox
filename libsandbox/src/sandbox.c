@@ -1016,6 +1016,39 @@ sandbox_watcher(sandbox_t * psbox)
         /* Notify the profiler thread to collect and examine stat */
         pthread_kill(profiler, SIGSTAT);
         
+        /* Out-of-quota (memory) events always happen on the return of relevant
+         * system calls, i.e. brk(), mmap(), etc. So we perform memory usage
+         * profiling as follows rather than in the profiler thread. */
+        {
+            LOCK(psbox, EX);
+            
+            /* mem_info */
+            #define MEM_UPDATE(a,b) \
+            {{{ \
+                (a) = (b); \
+                (a ## _peak) = (((a ## _peak) > (a)) ? (a ## _peak) : (a)); \
+            }}} /* MEM_UPDATE */
+            
+            MEM_UPDATE(psbox->stat.mem_info.vsize, proc.vsize);
+            MEM_UPDATE(psbox->stat.mem_info.rss, proc.rss * getpagesize());
+            psbox->stat.mem_info.minflt = proc.minflt;
+            psbox->stat.mem_info.majflt = proc.majflt;
+            
+            /* Compare memory usage against quota limit, raise out-of-quota 
+             * (memory) event when necessary. */
+            if (psbox->stat.mem_info.vsize_peak > \
+                psbox->task.quota[S_QUOTA_MEMORY])
+            {
+                DBUG("memory quota exceeded");
+                UNLOCK(psbox);
+                POST_EVENT(psbox, _QUOTA, S_QUOTA_MEMORY);
+            }
+            else
+            {
+                UNLOCK(psbox);
+            }
+        }
+        
         /* Deliver pending events to the policy module for investigation */
         LOCK(psbox, SH);
         while (!__QUEUE_EMPTY(pctrl))
@@ -1316,6 +1349,7 @@ sandbox_profiler(sandbox_t * psbox)
                 MONITOR_ERROR(psbox, "failed to probe process: %d", pid);
                 break;
             }
+            
             LOCK(psbox, EX);
             
             /* cpu_info */
@@ -1332,33 +1366,7 @@ sandbox_profiler(sandbox_t * psbox)
             CPU_UPDATE(psbox->stat.cpu_info.utime, proc.utime);
             CPU_UPDATE(psbox->stat.cpu_info.stime, proc.stime);
             
-            /* mem_info */
-            #define MEM_UPDATE(a,b) \
-            {{{ \
-                (a) = (b); \
-                (a ## _peak) = (((a ## _peak) > (a)) ? (a ## _peak) : (a)); \
-            }}} /* MEM_UPDATE */
-            
-            MEM_UPDATE(psbox->stat.mem_info.vsize, proc.vsize);
-            MEM_UPDATE(psbox->stat.mem_info.rss, proc.rss * getpagesize());
-            psbox->stat.mem_info.minflt = proc.minflt;
-            psbox->stat.mem_info.majflt = proc.majflt;
-            
-            /* Compare memory usage against quota limit, raise out-of-quota 
-             * (memory) event when necessary. */
-            if (psbox->stat.mem_info.vsize_peak > \
-                psbox->task.quota[S_QUOTA_MEMORY])
-            {
-                DBUG("memory quota exceeded");
-                UNLOCK(psbox);
-                POST_EVENT(psbox, _QUOTA, S_QUOTA_MEMORY);
-                trace_kill(&proc, SIGSTOP);
-                trace_kill(&proc, SIGCONT);
-            }
-            else
-            {
-                UNLOCK(psbox);
-            }
+            UNLOCK(psbox);
             
             /* Update the elapsed time stat of sandbox, raise out-of-quota
              * (wallclock) event when occured. */

@@ -1,3 +1,38 @@
+[2012/08/31] LIU Yu, <pineapple.liu@gmail.com>
+  * revoked the use of real-time signals, RT_SIGTERM (SIGRTMIN + 1) -> SIGEXIT
+    (SIGUSR1), RT_SIGSTAT (SIGRTMIN + 2) -> SIGSTAT (SIGUSR2), RT_SIGPROF ->
+    SIGPROF. This hopefully resolves an EINVAL in the trace manager thread due
+    to signal queue jamming.
+
+[2012/08/27] LIU Yu, <pineapple.liu@gmail.com>
+  * added a new --enable-pool configure option to enable global trace pool at
+    compile time. The global trace pool keeps track of all active instances of
+    sandbox running in the same process; and it incorporates a sandbox manager
+    to centralize some redundant duties of per-sandbox profiler threads.
+  * in platform.{h,c} renamed functions for clarity trace_self() -> trace_me(),
+    syscall_mode() -> proc_syscall_mode(), trace_main() -> trace_handler()
+  * in sandbox.c merged sandbox_resolver() into sandbox_watcher()
+  * in sandbox.c the profiler thread now sends a SIGSTOP signal to the prisoner
+    process after any out-of-quota event is posted. And the default policy 
+    bypasses SIGSTOP / SIGCONT events by default.
+  * moved macros PROF_FREQ and STAT_FREQ to internal.h (sandbox-dev.h)
+
+[2012/08/23] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox.{h,c} added a new worker_t type with both tid (pthread_t)
+    and target (thread_func_t function pointers), the tracer and monitors
+    of a sandbox are redefined as worker_t objects
+
+[2012/08/20] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox.{h,c} revised concurrency control mechanism to use rwlock
+  * in platform.c added global init() and fini() functions
+  * in platform.c proc_probe() no longer check for prisoner process state
+  * in platform.{h,c} and sandbox.c removed stub function trace_patch()
+
+[2012/08/07] LIU Yu, <pineapple.liu@gmail.com>
+  * in configure.in added multi-arch libdir test
+  * in configure.in updated version to 0.3.5-1
+  * updated intro in configure.in
+
 [2012/07/12] LIU Yu, <pineapple.liu@gmail.com>
   * in sandbox.c moved utime / stime profiling from the tracer to the profiler
     thread, and used real-time signal RT_SIGSTAT(+1) for notification

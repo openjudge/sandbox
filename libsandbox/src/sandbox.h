@@ -79,14 +79,14 @@ extern "C"
 
 /* Maximum number of monitor threads */
 #ifndef SBOX_MONITOR_MAX
-#define SBOX_MONITOR_MAX 8
+#define SBOX_MONITOR_MAX        8
 #else
 #warning "overriding default monitor pool size"
 #endif /* SBOX_MONITOR_MAX */
 
 /* Maximum number of queued events */
 #ifndef SBOX_EVENT_MAX
-#define SBOX_EVENT_MAX 32
+#define SBOX_EVENT_MAX          32
 #else
 #warning "overriding default event queue size"
 #endif /* SBOX_EVENT_MAX */
@@ -191,9 +191,6 @@ typedef enum
     S_STATUS_EXE       = 2,     /*!< Executing (waiting for event) */
     S_STATUS_BLK       = 3,     /*!< Blocked (handling event) */
     S_STATUS_FIN       = 4,     /*!< Finished */
-    S_STATUS_S0        = 5,     /*!< Reserved status 0 */
-    S_STATUS_S1        = 6,     /*!< Reserved status 1 */
-    S_STATUS_S2        = 7,     /*!< Reserved status 2 */
 } status_t;
 
 /** 
@@ -363,39 +360,56 @@ typedef void (* policy_entry_t)(const policy_t *, const event_t *, action_t *);
 typedef void * (* thread_func_t)(void *);
 #endif /* thread_func_t */
 
+/**
+ * @brief Structure for sandbox tracer and monitor objects.
+ */
+typedef struct
+{
+    thread_func_t target;       /**< thread function to be started */
+    pthread_t tid;              /**< thread id of the worker when started */
+} worker_t;
+
 /** 
  * @brief Configurable controller of a sandbox object.
  */
 typedef struct
 {
-    pthread_mutex_t mutex;      /**< mutex for scheduling thread functions */
-    pthread_cond_t sched;       /**< working state changed */
     pid_t pid;                  /**< id of the process being traced */
-    pthread_t tid;              /**< id of the thread who forked the process */
     action_t action;            /**< the action to be suggested by the policy */
     policy_t policy;            /**< the policy to consult for actions */
-    thread_func_t tracer;       /**< the tracer thread function */
-    thread_func_t monitor[SBOX_MONITOR_MAX]; /**< the pool of monitor threads */
+    worker_t tracer;            /**< the main tracer thread */
+    worker_t monitor[SBOX_MONITOR_MAX]; /**< the pool of monitor threads */
     struct
     {
         int head;
         int size;
-        event_t queue[SBOX_EVENT_MAX];
+        event_t list[SBOX_EVENT_MAX];
     } event;                    /**< the queue of pending events */
 } ctrl_t;
+
+/**
+ * @brief Read-write lock of a sandbox object.
+ */
+typedef struct
+{
+    pthread_mutex_t mutex;      /**< POSIX mutex */
+    pthread_cond_t rdc;         /**< eligible for read condition */
+    pthread_cond_t wrc;         /**< eligible for write condition */
+    int rdcount;                /**< number of concurrent readers */
+    bool wrlock;                /**< write locked */
+} lock_t;
 
 /** 
  * @brief Structure for collecting everything needed to run a sandbox. 
  */
 typedef struct
 {
-    pthread_mutex_t mutex;      /**< mutex for updating sandbox state */
-    pthread_cond_t update;      /**< sandbox state changed */
     status_t status;            /**< task status */
     result_t result;            /**< task result */
     task_t task;                /**< task initial specification */
     stat_t stat;                /**< task cumulative statistics */
     ctrl_t ctrl;                /**< configurable sandbox controller */
+    lock_t lock;                /**< rwlock for concurrency control */
 } sandbox_t;
 
 /** 

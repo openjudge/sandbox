@@ -29,6 +29,10 @@
  * POSSIBILITY OF SUCH DAMAGE.                                                 *
  ******************************************************************************/
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE             /* need this to activate pthread_sigqueue() */
+#endif /* _GNU_SOURCE */
+
 #include "platform.h"
 #include "sandbox.h"
 #include "internal.h"
@@ -36,12 +40,20 @@
 
 #include <ctype.h>              /* toupper() */
 #include <fcntl.h>              /* open(), close(), O_RDONLY */
+#include <pthread.h>            /* pthread_{create,join,...}() */
 #include <signal.h>             /* kill(), SIG* */
 #include <stdio.h>              /* read(), sscanf(), sprintf() */
+#include <stdlib.h>             /* malloc(), free() */
 #include <string.h>             /* memset(), strsep() */
+#include <sys/queue.h>          /* SLIST_*() */
+#include <sys/syscall.h>        /* syscall(), SYS_gettid */
 #include <sys/types.h>          /* off_t */
 #include <sys/times.h>          /* struct tms, struct timeval */
 #include <unistd.h>             /* access(), lseek(), {R,F}_OK */
+
+#ifndef sigev_notify_thread_id
+#define sigev_notify_thread_id _sigev_un._tid
+#endif /* sigev_notify_thread_id */
 
 #ifdef HAVE_PTRACE
 #ifdef HAVE_SYS_PTRACE_H
@@ -111,7 +123,7 @@ proc_bind(const void * const dummy, proc_t * const pproc)
     sandbox_t * psbox = (sandbox_t *)dummy;
     
     pproc->pid = psbox->ctrl.pid;
-    pproc->tflags.trace_id = psbox->ctrl.tid;
+    pproc->tflags.trace_id = psbox->ctrl.tracer.tid;
     
     FUNC_RET("%d", true);
 }
@@ -339,7 +351,8 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
             addr -= 2; /* backoff 2 bytes in system call tracing mode */
         }
         
-        if (__trace(T_OPTION_GETDATA, pproc, (void *)addr, (long *)&pproc->op) != 0)
+        if (__trace(T_OPTION_GETDATA, pproc, (void *)addr, 
+            (long *)&pproc->op) != 0)
         {
             FUNC_RET("%d", false);
         }
@@ -364,7 +377,7 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
 }
 
 int
-syscall_mode(proc_t * const pproc)
+proc_syscall_mode(proc_t * const pproc)
 {
     FUNC_BEGIN("%p", pproc);
     assert(pproc);
@@ -531,7 +544,7 @@ proc_dump(const proc_t * const pproc, const void * const addr,
 }
 
 bool
-trace_self(void)
+trace_me(void)
 {
     FUNC_BEGIN();
     
@@ -539,25 +552,10 @@ trace_self(void)
 #ifdef HAVE_PTRACE
     res = (ptrace(PTRACE_TRACEME, 0, NULL, NULL) == 0);
 #else
-#warning "trace_self() is not implemented for this platform"
+#warning "trace_me() is not implemented for this platform"
 #endif /* HAVE_PTRACE */
     
     FUNC_RET("%d", res);
-}
-
-bool
-trace_hack(proc_t * const pproc)
-{
-    FUNC_BEGIN("%p", pproc);
-    assert(pproc);
-    
-#ifdef DELETED
-    bool res = (__trace(T_OPTION_SETREGS, pproc, NULL, NULL) == 0);
-    
-    FUNC_RET("%d", res);
-#else    
-    FUNC_RET("%d", true);
-#endif /* DELETED */
 }
 
 bool
@@ -578,50 +576,7 @@ trace_kill(proc_t * const pproc, int signo)
     FUNC_BEGIN("%p,%d", pproc, signo);
     assert(pproc);
     
-    /* We only do opcode rewrite when signo is non-blockable, i.e. SIGKILL or 
-     * SIGSTOP. This is because the prisoner process may continue to execute
-     * after handling (or ignoring) a blockable signal. It is only reasonable to
-     * rewrite the opcode to a sequence of nop's, if the prisoner process is 
-     * guaranteed to terminate or get killed immediately. */
-    
-    if ((signo == SIGKILL) || (signo == SIGSTOP))
-    {
-        if (proc_probe(pproc->pid, PROBE_REGS, pproc))
-        {
-#ifdef __x86_64__
-            unsigned char * addr = (unsigned char *)pproc->regs.rip;
-            unsigned long nop = 0x9090909090909090UL;
-#else /* __i386__ */
-            unsigned char * addr = (unsigned char *)pproc->regs.eip;
-            unsigned long nop = 0x90909090UL;
-#endif /* __x86_64__ */        
-            __trace(T_OPTION_SETDATA, pproc, (void *)addr, (long *)&nop);
-        }
-    }
-    
     bool res = (kill(-(pproc->pid), signo) == 0);
-    
-#ifdef DELETED   
-    if (pproc->tflags.is_in_syscall)
-    {
-        long scno = SYS_pause;
-#ifdef __x86_64__
-        if (pproc->syscall_mode == SCMODE_LINUX32)
-        {
-            scno = SYS32_pause;
-        }
-#endif /* __x86_64__ */
-        if (pproc->tflags.single_step)
-        {
-            pproc->regs.NAX = scno;
-        }
-        else
-        {
-            pproc->regs.ORIG_NAX = scno;
-        }
-        __trace(T_OPTION_SETREGS, (proc_t *)pproc, NULL, NULL);
-    }
-#endif /* DELETED */
     
     FUNC_RET("%d", res);
 }
@@ -641,9 +596,9 @@ trace_end(const proc_t * const pproc)
  * But ptrace() only works when called from the *main* thread initially started 
  * tracing the prisoner process (and thus being the parent of the latter). The 
  * workaround is to make __trace() asynchronous. It places the desired option 
- * (and input) into a set of global variables, and waits for trace_main() to 
- * perform the desired options by calling __trace_impl(), which then calls 
- * ptrace(). trace_main() is guaranteed to be running in the *main* thread. */
+ * (and input) into global variables, and waits for sandbox_tracer() to perform
+ * the desired options by calling __trace_impl(), which then calls ptrace().
+ * sandbox_tracer() is guaranteed to be running in the *main* thread. */
 
 #define NO_ACTION(act) \
     (((act) == T_OPTION_NOP) || ((act) == T_OPTION_ACK)) \
@@ -665,7 +620,7 @@ __trace_impl(option_t option, proc_t * const pproc, void * const addr,
     long res = -1;
     pid_t pid = pproc->pid;
     
-    if ((pproc->ppid != getpid()) || (toupper(pproc->state) != 'T'))
+    if (pproc->ppid != getpid())
     {
         FUNC_RET("%ld", res);
     }
@@ -719,6 +674,8 @@ __trace_impl(option_t option, proc_t * const pproc, void * const addr,
     FUNC_RET("%ld", res);
 }
 
+/* Global variables for the trace subsystem */
+
 typedef struct
 {
     option_t option;
@@ -726,11 +683,11 @@ typedef struct
     void * addr;
     long data;
     long result;
+    int errnum;
 } trace_info_t;
 
-static pthread_mutex_t trace_mutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t trace_notice = PTHREAD_COND_INITIALIZER;
-static trace_info_t trace_info = {T_OPTION_NOP, NULL, NULL, 0, 0};
+static trace_info_t trace_info = {T_OPTION_NOP, NULL, NULL, 0, 0, 0};
+static pthread_cond_t trace_update = PTHREAD_COND_INITIALIZER;
 
 static long
 __trace(option_t option, proc_t * const pproc, void * const addr, 
@@ -741,20 +698,21 @@ __trace(option_t option, proc_t * const pproc, void * const addr,
     assert(pproc);
     
     /* Shortcut to synchronous trace */
-    if ((pproc->tflags.trace_id == pthread_self()) && (option != T_OPTION_END))
+    if (pthread_equal(pproc->tflags.trace_id, pthread_self()) && 
+        (option != T_OPTION_END))
     {
         FUNC_RET("%ld", __trace_impl(option, pproc, addr, pdata));
     }
     
     long res = 0;
     
-    P(&trace_mutex);
+    P(&global_mutex);
     
     /* Wait while an existing option is being performed */
     while (trace_info.option != T_OPTION_NOP)
     {
         DBUG("waiting for trace slot");
-        pthread_cond_wait(&trace_notice, &trace_mutex);
+        pthread_cond_wait(&trace_update, &global_mutex);
     }
     
     DBUG("obtained trace slot");
@@ -765,13 +723,14 @@ __trace(option_t option, proc_t * const pproc, void * const addr,
     trace_info.addr = addr;
     trace_info.data = ((pdata != NULL)?(*pdata):(0));
     trace_info.result = 0;
+    trace_info.errnum = errno;
+    pthread_cond_broadcast(&trace_update);
     
     /* Wait while the option is being performed */
     while (trace_info.option != T_OPTION_ACK)
     {
         DBUG("requesting trace option: %s", t_option_name(trace_info.option));
-        pthread_cond_broadcast(&trace_notice);
-        pthread_cond_wait(&trace_notice, &trace_mutex);
+        pthread_cond_wait(&trace_update, &global_mutex);
     }
     
     if (pdata != NULL)
@@ -779,6 +738,7 @@ __trace(option_t option, proc_t * const pproc, void * const addr,
         *pdata = trace_info.data;
     }
     res = trace_info.result;
+    errno = trace_info.errnum;
     
     DBUG("collected trace results");
     
@@ -788,38 +748,50 @@ __trace(option_t option, proc_t * const pproc, void * const addr,
     trace_info.addr = NULL;
     trace_info.data = 0;
     trace_info.result = 0;
-    pthread_cond_broadcast(&trace_notice);
+    trace_info.errnum = errno;
+    pthread_cond_broadcast(&trace_update);
     
     DBUG("released trace slot");
     
-    V(&trace_mutex);
+    V(&global_mutex);
     
     FUNC_RET("%ld", res);
 }
 
 void *
-trace_main(void * const dummy)
+sandbox_tracer(void * const dummy)
 {
     FUNC_BEGIN("%p", dummy);
     assert(dummy);
-    sandbox_t * psbox = (sandbox_t *)dummy;
+    
+    sandbox_t * const psbox = (sandbox_t *)dummy;
     
     if (psbox == NULL)
     {
         FUNC_RET("%p", (void *)NULL);
     }
     
+#ifdef WITH_TRACE_POOL
+    /* Register sandbox to the pool */
+    P(&global_mutex);
+    sandbox_ref_t * item = (sandbox_ref_t *)malloc(sizeof(sandbox_ref_t));
+    item->psbox = psbox;
+    SLIST_INSERT_HEAD(&sandbox_pool, item, entries);
+    DBUG("registered sandbox %p to the pool", psbox);
+    V(&global_mutex);
+#endif /* WITH_TRACE_POOL */
+    
     /* Detect and perform options while the sandbox is running */
     bool end = false;
     
-    P(&trace_mutex);
+    P(&global_mutex);
     while (!end)
     {
         /* Wait for an option request */
         if (NO_ACTION(trace_info.option))
         {
             DBUG("waiting for new trace option");
-            pthread_cond_wait(&trace_notice, &trace_mutex);
+            pthread_cond_wait(&trace_update, &global_mutex);
             if (NO_ACTION(trace_info.option))
             {
                 continue;
@@ -827,7 +799,7 @@ trace_main(void * const dummy)
         }
         
         proc_t * pproc = trace_info.pproc;
-        if (pproc->tflags.trace_id != pthread_self())
+        if (!pthread_equal(pproc->tflags.trace_id,  pthread_self()))
         {
             continue;
         }
@@ -839,28 +811,38 @@ trace_main(void * const dummy)
             end = true;
         }
         
+        /* Notify the trace_*() to collect results */
         trace_info.result = __trace_impl(trace_info.option, trace_info.pproc,
             trace_info.addr, &trace_info.data);
-        
-        /* Notify the trace_*() to collect results */
+        trace_info.errnum = errno;
         trace_info.option = T_OPTION_ACK;
+        pthread_cond_broadcast(&trace_update);
         
         while (trace_info.option == T_OPTION_ACK)
         {
             DBUG("sending trace option: %s", t_option_name(T_OPTION_ACK));
-            pthread_cond_broadcast(&trace_notice);
-            pthread_cond_wait(&trace_notice, &trace_mutex);
+            pthread_cond_wait(&trace_update, &global_mutex);
         }
         
         DBUG("sent trace option: %s", t_option_name(T_OPTION_ACK));
     }
-    V(&trace_mutex);
+    V(&global_mutex);
+    
+#ifdef WITH_TRACE_POOL
+    /* Remove sandbox from the pool */
+    P(&global_mutex);
+    assert(item);
+    SLIST_REMOVE(&sandbox_pool, item, __pool_item, entries);
+    free(item);
+    DBUG("removed sandbox %p from the pool", psbox);
+    V(&global_mutex);
+#endif /* WITH_TRACE_POOL */
     
     FUNC_RET("%p", (void *)&psbox->result);
 }
 
 #ifndef CACHE_SIZE
-#define CACHE_SIZE (1 << 21)    /* assume 2MB cache */
+#define CACHE_SIZE (1 << 22)    /* assume 4MB cache */
 #endif /* CACHE_SIZE */
 
 static int cache[CACHE_SIZE / sizeof(int)];
@@ -898,6 +880,11 @@ check_procfs(pid_t pid)
     sprintf(buffer, PROCFS "/%d",pid);
     if (access(buffer, R_OK | X_OK) < 0)
     {
+        /* Patch errno to ESRCH (No such process) */
+        if (errno == ENOENT)
+        {
+            errno = ESRCH;
+        }
         FUNC_RET("%d", false);
     }
     
@@ -905,6 +892,177 @@ check_procfs(pid_t pid)
 }
 
 #endif /* HAVE_PROCFS */
+
+timer_t
+sandbox_timer(int signo, int freq)
+{
+    FUNC_BEGIN("%d,%d", signo, freq);
+    assert((signo > 0) && (freq > 0));
+    
+    timer_t timer;
+    
+    struct sigevent sev;
+    memset(&sev, 0, sizeof(struct sigevent));
+    sev.sigev_value.sival_ptr = &timer;
+    sev.sigev_signo = signo;
+    sev.sigev_notify = SIGEV_THREAD_ID;
+    sev.sigev_notify_thread_id = syscall(SYS_gettid);
+    
+    if (timer_create(CLOCK_MONOTONIC, &sev, &timer) != 0)
+    {
+        FUNC_RET(timer);
+    }
+    
+    struct itimerspec its;
+    its.it_interval.tv_sec = 0;
+    its.it_interval.tv_nsec = ms2ns(1000 / freq);
+    its.it_value.tv_sec = 0;
+    its.it_value.tv_nsec = ms2ns(20); // warmup time
+    
+    if (timer_settime(timer, 0, &its, NULL) != 0)
+    {
+        FUNC_RET(timer);
+    }
+    
+    FUNC_RET(timer);
+}
+
+void
+sandbox_notify(sandbox_t * const psbox, int signo)
+{
+    PROC_BEGIN("%p", psbox);
+    assert(psbox && (signo > 0));
+    
+    const pthread_t profiler = psbox->ctrl.monitor[0].tid;
+    switch (signo)
+    {
+    case SIGEXIT:
+    case SIGSTAT:
+    case SIGPROF:
+        pthread_kill(profiler, signo);
+        break;
+    default:
+        /* Wrap the real signal in the payload of SIGEXIT, because the
+         * profiler thread of a sandbox instance only waits for the
+         * three reserved signals, SIG{EXIT, STAT, PROF}. */
+        {
+            union sigval sv;
+            sv.sival_int = signo;
+            if (pthread_sigqueue(profiler, SIGEXIT, sv) != 0)
+            {
+                WARN("failed pthread_sigqueue()");
+            }
+        }
+        break;
+    }
+    
+    PROC_END();
+}
+
+static sigset_t sigmask;
+static sigset_t oldmask;
+
+#ifdef WITH_TRACE_POOL
+
+static pthread_t manager;
+
+#endif /* WITH_TRACE_POOL */
+
+static __attribute__((constructor)) void 
+init(void)
+{
+    PROC_BEGIN();
+    
+    /* Block signals relevant to libsandbox control, they will be unblocked 
+     * and handled by the the manager thread (pool mode) or by the profiler 
+     * threads of individual sandboxes (non-pool mode). */
+    
+    sigemptyset(&sigmask);
+    sigaddset(&sigmask, SIGEXIT);
+    sigaddset(&sigmask, SIGSTAT);
+    sigaddset(&sigmask, SIGPROF);
+    sigaddset(&sigmask, SIGTERM);
+    sigaddset(&sigmask, SIGQUIT);
+    sigaddset(&sigmask, SIGINT);
+    
+    if (pthread_sigmask(SIG_BLOCK, &sigmask, &oldmask) != 0)
+    {
+        WARN("pthread_sigmask");
+    }
+    DBUG("blocked reserved signals");
+    
+#ifdef WITH_TRACE_POOL
+    
+    if (pthread_create(&manager, NULL, (thread_func_t)sandbox_manager, 
+        (void *)&sandbox_pool) != 0)
+    {
+        WARN("failed to create the manager thread at %p", sandbox_manager);
+    }
+    DBUG("created the manager thread at %p", sandbox_manager);
+    
+#endif /* WITH_TRACE_POOL */
+    
+    PROC_END();
+}
+
+static __attribute__((destructor)) void
+fini(void)
+{
+    PROC_BEGIN();
+    
+#ifdef WITH_TRACE_POOL
+
+    pthread_kill(manager, SIGEXIT);
+    if (pthread_join(manager, NULL) != 0)
+    {
+        WARN("failed to join the manager thread");
+        if (pthread_cancel(manager) != 0)
+        {
+            WARN("failed to cancel the manager thread");
+        }
+    }
+    DBUG("joined the manager thread");
+    
+    /* Release references to active sandboxes */
+    P(&global_mutex);
+    while (!SLIST_EMPTY(&sandbox_pool))
+    {
+        sandbox_ref_t * const item = SLIST_FIRST(&sandbox_pool);
+        int i;
+        for (i = 0; i < (SBOX_MONITOR_MAX); i++)
+        {
+            pthread_kill(item->psbox->ctrl.monitor[i].tid, SIGEXIT);
+        }
+        SLIST_REMOVE_HEAD(&sandbox_pool, entries);
+        free(item);
+    }
+    V(&global_mutex);
+    
+#endif /* WITH_TRACE_POOL */
+    
+    /* All sandbox instances should have been stopped at this point. Any 
+     * pending signal in the reserved set is safe to be ignored. This step is 
+     * necessary for non-pool mode, becuase profiling signals are delivered
+     * to the entire process and may arrive after the profiler thread of the
+     * sandbox instance has been joined. */
+    int signo;
+    siginfo_t siginfo;
+    struct timespec timeout = {0, ms2ns(20)};
+    while ((signo = sigtimedwait(&sigmask, &siginfo, &timeout)) > 0)
+    {
+        DBUG("flushing signal %d", signo);
+    }
+    DBUG("flushed all pending signals");
+    
+    /* Restore saved sigmask */
+    if (pthread_sigmask(SIG_SETMASK, &oldmask, NULL) != 0)
+    {
+        WARN("pthread_sigmask");
+    }
+    DBUG("restored old signal mask");
+    
+    PROC_END();
+}
 
 #ifdef __cplusplus
 } /* extern "C" */

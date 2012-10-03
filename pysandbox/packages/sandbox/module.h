@@ -186,7 +186,6 @@ typedef struct
 #define MSG_SBOX_INIT_FAILED    "failed in sandbox initialization"
 #define MSG_SBOX_CHECK_FAILED   "failed in sandbox pre-execution check"
 #define MSG_CTRL_CHECK_FAILED   "failed in sandbox control policy check"
-#define MSG_TYPE_READY_FAILED   "failed to finalize new type object"
 #define MSG_TYPE_ADD_FAILED     "failed to add new type object to module"
 #define MSG_BLOCK_SIG_FAILED    "failed to block signals reserved by module"
 

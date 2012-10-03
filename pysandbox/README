@@ -1,5 +1,5 @@
 INTRODUCTION
-   
+  
   The sandbox libraries (libsandbox & pysandbox) provide API's in C/C++ and
   Python for executing and profiling simple (single process) programs in a 
   restricted environment, or sandbox. These API's can help developers to build
@@ -71,50 +71,60 @@ GETTING STARTED
 SPECIAL NOTICES
   
   1. libsandbox is designed for, and has been tested on, linux-2.6 (CentOS 6.2,
-     Ubuntu 11.4) and linux-3.0 (Ubuntu 11.10) systems on i686 and x86_64 
-     architectures (x86_64 supported since v0.3.x). The behaviours of libsandbox
-     on other platforms are undefined, even if, though unlikely, it can pass 
-     configuration and (or) compilation;
-  2. As of v0.3.3, libsandbox only supports single process ELF programs. If the
+     Ubuntu 11.4) and linux-3.0 (Ubuntu 11.10, Ubuntu 12.10) systems on i686 
+     and x86_64 architectures (x86_64 supported since v0.3.x). The behaviours 
+     of libsandbox on other platforms are undefined, even if, though unlikely, 
+     they pass configuration and (or) compilation;
+  2. As of v0.3.5, libsandbox only supports single process ELF programs. If the
      user-provided policy module bypasses system calls that spawn new processes
      (i.e. returning S_ACTION_CONT upon seeing SYS_fork, SYS_vfork, SYS_clone)
      the subsequent behaviours of libsandbox are undefined;
-  3. On x86_64 systems, both 32bit and 64bit programs should be *sandboxed* by  
+  3. On x86_64 systems, both 32bit and 64bit programs MUST be *sandboxed* by  
      64bit libsandbox. In particular, NEVER run any program (not even native
      32bit programs) with 32bit libsandbox on 64bit systems. Otherwise, there 
      is suspected risk that a malicious 32bit program can bypass some system 
      call restrictions through mapping in 64bit system call table;
-  4. As of v0.3.3, libsandbox internally uses ptrace() to intercept and probe 
+  4. As of v0.3.5, libsandbox internally uses ptrace() to intercept and probe 
      system calls invoked by the *sandboxed* program. If the *sandboxed* program
      itself invokes ptrace(), and that the user-provided policy module bypasses 
      relevant events (i.e. returning S_ACTION_CONT upon seeing SYS_ptrace), the 
      subsequent behaviours of libsandbox are undefined;
   5. libsandbox interprets some signals sent to the *sandboxed* program as out- 
-     of-quota (wallclock, cpu, memory) events (for v0.2.x the affiliated signals
-     are SIGXCPU, SIGXFZ, SIGPROF, SIGALRM, SIGVTALRM, and SIGUSR1; for v0.3.x 
-     the only affiliated signal is SIGXFSZ). If the *sandboxed* program depends 
-     on these signals to perform internal functionalities (i.e. Java VM uses 
-     SIGPROF and optionally SIGUSR1 and SIGUSR2), the user-provided policy 
-     module of libsandbox may cause the *sandboxed* program to terminate upon 
-     seeing relevant events. Moreover, if user-provided policies bypass system 
-     call events that block relevant signals (i.e. returning S_ACTION_CONT 
-     without checking parameters of SYS_sigsetmask, SYS_pthread_sigmask, etc.),
-     libsandbox could fail to detect relevant out-of-quota events;
-  6. When the process, or thread, running libsandbox v0.3.x (i.e. which is the
-     parent process of the *sandboxed* program) receives any one of SIGTERM, 
-     SIGINT, and SIGQUIT signals, it sends the same signal to the *sandboxed* 
-     program. But the former may continue to execute if i) the *sandboxed* 
-     program is still running after receiving the signal, and ii) the user-
-     specified policy module explicitly requires libsandbox to continue;
-  7. When the process, or thread, running libsandbox v0.3.x receives unexpected 
-     signals (i.e. not any of SIGALRM, SIGPROF, SIGTERM, SIGINT, or SIGQUIT) that
-     are blockable (i.e. other than SIGKILL and SIGSTOP), it terminates the 
-     *sandboxed* program with SIGKILL. And since this is not the fault of the 
-     *sandboxed* program, the result will be set to S_RESULT_IE;
-  8. libsandbox (v0.3.x) includes some optional features that can be enabled
+     of-quota (wallclock, cpu, memory, disk) events (for v0.2.x the affiliated 
+     signals are SIGXCPU, SIGXFZ, SIGPROF, SIGALRM, SIGVTALRM, and SIGUSR1; for
+     v0.3.x the only affiliated signal is SIGXFSZ). If the *sandboxed* program 
+     depends on these signals to perform internal functionalities, the user-
+     provided policy module of libsandbox may cause the *sandboxed* program to 
+     terminate upon seeing relevant events. Moreover, if user-provided policies
+     bypass system call events that block such signals (i.e. returning S_ACTION
+     _CONT without checking parameters of SYS_sigsetmask, SYS_pthread_sigmask, 
+     etc.), libsandbox could fail to detect relevant out-of-quota events;
+  6. By default, the disk output quota only applies to persistent storage. 
+     Write operations to i) standard output buffer (i.e. stdout / stderr), ii) 
+     null devices (i.e. /dev/null), or iii) pipelined to another process do NOT 
+     count against the disk output quota. This default behaviour, however, 
+     could be overridden by user-specified policy modules.
+  7. Since v0.3.5, libsandbox dedicates a manager thread to handle termination 
+     signals including SIGTERM, SIGINT, and SIGQUIT. When the manager thread
+     receives any of these signals, it sends the same signal to the *sandboxed*
+     program. But the supervisor process, or thread, running libsandbox may 
+     continue to execute if i) the *sandboxed* program is still running after 
+     receiving the signal, and ii) the user-specified policy module explicitly 
+     requires libsandbox to continue;
+  8. If the supervisor process, or thread, running libsandbox (i.e. which is 
+     the parent process of the *sandboxed* program) terminates upon receiving 
+     termination signals other than SIGTERM, SIGINT, and SIGQUIT, or if custom 
+     signal handlers are registered such that they prevent the manager thread 
+     of libsandbox from receiving the three termination signals, then there is
+     suspected risk that the *sandboxed* program may go beyond the control of 
+     libsandbox. In such cases, some of the restrictions placed by libsandbox,
+     including quota limit and policy-based behaviour auditing, may become 
+     invalid. However, OS-level security mechanisms, including chroot() jail 
+     and setuid() privileges, are still in effect.
+  9. libsandbox (v0.3.x) includes some optional features that can be enabled
      during configuration. Please note that --enable-tsc and --enable-rtsched 
      are highly experimental, and are not recommended for production systems;
-  9. On some linux-2.6-x86_64 systems, to correctly inspect the system call mode
+ 10. On some linux-2.6-x86_64 systems, to correctly inspect the system call mode
      of some 32bit programs, it could be mandatory to build libsandbox (0.3.x) 
      with --enable-chkvsc option (since 0.3.3-rc4). The binary packages for 
      x86_64 systems enabled this option by default;

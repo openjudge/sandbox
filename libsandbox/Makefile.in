@@ -74,7 +74,7 @@ lib$(LIBRARY).so : lib$(LIBRARY).so.$(VERSION)
 	$(LN) lib$(LIBRARY).so.$(VERSION) lib$(LIBRARY).so
 
 lib$(LIBRARY).so.$(VERSION) : $($(LIBRARY)_obj)
-	$(CC) $(CFLAGS) $(LDFLAGS) $(LIBS) -o $(@) $($(LIBRARY)_obj)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $(@) $($(LIBRARY)_obj) $(LIBS)
 
 lib$(LIBRARY).a: $($(LIBRARY)_obj)
 	$(AR) $(@) $($(LIBRARY)_obj)

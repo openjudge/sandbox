@@ -255,7 +255,7 @@ int proc_syscall_mode(proc_t * const);
 /* SYSCALL_ARG3 */
 #define SYSCALL_ARG4(pproc) \
     RVAL_IF(THE_SCMODE(pproc) == SCMODE_LINUX64) \
-        ((pproc)->regs.rcx) \
+        ((pproc)->regs.r10) \
     RVAL_ELSE \
         MAKE_WORD((pproc)->regs.rsi, 0) \
     RVAL_FI \

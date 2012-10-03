@@ -65,7 +65,7 @@ try:
     core_ccflags = check_output(pkgconfig + ['--cflags', ]).decode().split()
     core_ldflags = check_output(pkgconfig + ['--libs', ]).decode().split()
 except:
-    core_ccflags = []
+    core_ccflags = ['-pthread', ]
     core_ldflags = ['-lsandbox', '-lrt']
 
 _sandbox = Extension('_sandbox',

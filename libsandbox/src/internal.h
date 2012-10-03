@@ -42,6 +42,7 @@
 #include <pthread.h>            /* pthread_mutex_{lock,unlock}() */
 #include <signal.h>             /* kill(), SIG* */
 #include <stdio.h>              /* fprintf(), fflush(), stderr */
+#include <sys/queue.h>          /* SLIST_*() */
 #include <time.h>               /* struct timespec */
 
 #ifdef __cplusplus
@@ -56,8 +57,10 @@ extern "C"
 #else
 #define _LOG(fmt,x...) \
 {{{ \
+    int errnum = errno; \
     fprintf(stderr, fmt "\n", ##x); \
     fflush(stderr); \
+    errno = errnum; \
 }}}
 #endif /* NDEBUG */
 #endif /* _LOG */
@@ -98,11 +101,27 @@ extern "C"
 #endif /* FUNC_BEGIN */
 
 #ifndef FUNC_RET
-#define FUNC_RET(fmt,r) \
+#define _RET_1(r) \
+{{{ \
+    DBUG("leaving: %s() = <opaque>", __FUNCTION__); \
+    return (r); \
+}}}
+#define _RET_2(fmt,r) \
 {{{ \
     DBUG("leaving: %s() = " fmt, __FUNCTION__, (r)); \
     return (r); \
 }}}
+#define _RET_X(r,fmt,x...) \
+{{{ \
+    DBUG("leaving: %s() = " fmt, __FUNCTION__, ##x); \
+    return (r); \
+}}}
+#define _7TH(arg1,arg2,arg3,arg4,arg5,arg6,arg7,...) \
+    arg7
+#define _RET(...) \
+    _7TH(__VA_ARGS__, _RET_X, _RET_X, _RET_X, _RET_X, _RET_2, _RET_1, )
+#define FUNC_RET(...) \
+    _RET(__VA_ARGS__)(__VA_ARGS__)
 #endif /* FUNC_RET */
 
 #ifndef PROC_BEGIN
@@ -117,7 +136,10 @@ extern "C"
 }}}
 #endif /* PROC_END */
 
-/* Macros for pthread mutex lock / unlock */
+/* Macros for concurrency control */
+#define LOCK_INITIALIZER (lock_t){PTHREAD_MUTEX_INITIALIZER, \
+    PTHREAD_COND_INITIALIZER, PTHREAD_COND_INITIALIZER, 0, false}
+
 #ifndef P
 #define P(pm) \
 {{{ \
@@ -138,10 +160,150 @@ extern "C"
 }}}
 #endif /* V */
 
+#ifndef __RWLOCK_WRITE_OPTIMIZED
+#define __RWLOCK_WRITE_OPTIMIZED (false)
+#endif /* __RWLOCK_WRITE_OPTIMIZED */
+
+#ifndef __RWLOCK_READER_WAIT
+#define __RWLOCK_READER_WAIT(plock, cond) \
+{{{ \
+    while ((((plock)->wrlock) && (__RWLOCK_WRITE_OPTIMIZED)) || (cond)) \
+    { \
+        DBUG("%s() waiting for shared lock (%dr/%dw)", __FUNCTION__, \
+            ((plock)->rdcount), (((plock)->wrlock) ? 1 : 0)); \
+        pthread_cond_wait(&((plock)->rdc), &((plock)->mutex)); \
+    } \
+}}} 
+#endif /* __RWLOCK_READER_WAIT */  
+
+#ifndef __RWLOCK_WRITER_WAIT
+#define __RWLOCK_WRITER_WAIT(plock,cond) \
+{{{ \
+    while (((plock)->wrlock) || (((plock)->rdcount) > 0) || (cond)) \
+    { \
+        DBUG("%s() waiting for exclusive lock (%dr/%dw)", __FUNCTION__, \
+            ((plock)->rdcount), (((plock)->wrlock) ? 1 : 0)); \
+        pthread_cond_wait(&((plock)->wrc), &((plock)->mutex)); \
+    } \
+}}}
+#endif /* __RWLOCK_WRITER_WAIT */
+
+#ifndef __RWLOCK_LOCK_SH_WHEN
+#define __RWLOCK_LOCK_SH_WHEN(plock,cond) \
+{{{ \
+    __RWLOCK_READER_WAIT(plock, !(cond)); \
+    ++((plock)->rdcount); \
+    DBUG("%s() acquired lock (shared)", __FUNCTION__); \
+}}}
+#endif /* __RWLOCK_LOCK_SH_WHEN */
+
+#ifndef __RWLOCK_LOCK_EX_WHEN
+#define __RWLOCK_LOCK_EX_WHEN(plock,cond) \
+{{{ \
+    __RWLOCK_WRITER_WAIT(plock, !(cond)); \
+    ((plock)->wrlock) = true; \
+    DBUG("%s() acquired lock (exclusive)", __FUNCTION__); \
+}}}
+#endif /* __RWLOCK_LOCK_EX_WHEN */
+
+#ifndef __RWLOCK_UNLOCK
+#define __RWLOCK_UNLOCK(plock) \
+{{{ \
+    assert((((plock)->rdcount) > 0) || ((plock)->wrlock)); \
+    if (((plock)->rdcount) > 0) \
+    { \
+        --((plock)->rdcount); \
+    } \
+    else \
+    { \
+        ((plock)->wrlock) = false; \
+    } \
+    DBUG("%s() released lock", __FUNCTION__); \
+}}}
+#endif /* __RWLOCK_UNLOCK */
+
+#ifndef LOCK_ON_COND
+#define LOCK_ON_COND(psbox,mode,cond) \
+{{{ \
+    P(&((psbox)->lock.mutex)); \
+    __RWLOCK_LOCK_ ## mode ## _WHEN(&((psbox)->lock), (cond)); \
+    V(&((psbox)->lock.mutex)); \
+}}}
+#endif /* LOCK_ON_COND */
+
+#ifndef LOCK
+#define LOCK(psbox,mode) \
+{{{ \
+    LOCK_ON_COND(psbox, mode, true); \
+}}}
+#endif /* LOCK */
+
+#ifndef UNLOCK
+#define UNLOCK(psbox) \
+{{{ \
+    P(&((psbox)->lock.mutex)); \
+    __RWLOCK_UNLOCK(&((psbox)->lock)); \
+    pthread_cond_broadcast(&((psbox)->lock.rdc)); \
+    if (((psbox)->lock.rdcount) == 0) \
+    { \
+        pthread_cond_broadcast(&((psbox)->lock.wrc)); \
+    } \
+    V(&((psbox)->lock.mutex)); \
+}}}
+#endif /* UNLOCK */
+
+#ifndef RELOCK
+#define RELOCK(psbox,mode) \
+{{{ \
+    P(&((psbox)->lock.mutex)); \
+    __RWLOCK_UNLOCK(&((psbox)->lock)); \
+    __RWLOCK_LOCK_ ## mode ## _WHEN(&((psbox)->lock), true); \
+    V(&((psbox)->lock.mutex)); \
+}}}
+#endif /* RELOCK */
+
+/* Macros for sandbox coordination */
+#define SIGEXIT          (SIGUSR1)
+#define SIGSTAT          (SIGUSR2)
+
+#define PROF_FREQ        (200)
+#define STAT_FREQ        (5)
+
+struct __pool_item
+{
+    sandbox_t * psbox;
+    SLIST_ENTRY(__pool_item) entries;
+};
+
+extern SLIST_HEAD(__pool_struct, __pool_item) sandbox_pool;
+
+extern pthread_mutex_t global_mutex;
+
+/**
+ * @brief Reference to a \c sandbox_t object.
+ */
+typedef struct __pool_item sandbox_ref_t;
+
+/**
+ * @brief Pool of active \c sandbox_t objects.
+ */
+typedef struct __pool_struct sandbox_pool_t;
+
+/**
+ * @brief Send signal to monitor threads of a \c sandbox_t object.
+ */
+void sandbox_notify(sandbox_t * const psbox, int signo);
+
+/**
+ * @brief Service thread for coordinating active \c sandbox_t objects.
+ */
+void * sandbox_manager(sandbox_pool_t * const pool);
+
 /* Macros for testing sandbox status */
 #ifndef NOT_STARTED
 #define NOT_STARTED(psbox) \
-    ((((psbox)->status) == S_STATUS_RDY) || (((psbox)->status) == S_STATUS_PRE))
+    ((((psbox)->status) == S_STATUS_RDY) || \
+     (((psbox)->status) == S_STATUS_PRE))
 #endif /* NOT_STARTED */
 
 #ifndef IS_RUNNING
@@ -171,32 +333,24 @@ extern "C"
     assert(psbox); \
     if (psbox == NULL) \
     { \
-        FUNC_RET("%p", NULL); \
+        FUNC_RET("%p", (void *)NULL); \
     } \
-    P(&((psbox)->mutex)); \
-    while (NOT_STARTED(psbox)) \
+    LOCK_ON_COND(psbox, SH, !NOT_STARTED(psbox) || HAS_RESULT(psbox)); \
+    if (NOT_STARTED(psbox) || IS_FINISHED(psbox) || HAS_RESULT(psbox)) \
     { \
-        DBUG("waiting for the sandbox to start"); \
-        pthread_cond_wait(&((psbox)->update), &((psbox)->mutex)); \
-    } \
-    if (NOT_STARTED(psbox) || IS_FINISHED(psbox)) \
-    { \
-        V(&((psbox)->mutex)); \
+        UNLOCK(psbox); \
         FUNC_RET("%p", (void *)&((psbox)->result)); \
     } \
-    V(&((psbox)->mutex)); \
+    else \
+    { \
+        UNLOCK(psbox); \
+    } \
 }}} /* MONITOR_BEGIN */
 
 #define MONITOR_END(psbox) \
 {{{ \
     FUNC_RET("%p", (void *)&((psbox)->result)); \
 }}} /* MONITOR_END */
-
-/* Macros of reserved signals (mostly for the profiler thread) */
-
-#define RT_SIGQUIT (SIGRTMIN + 1)
-#define RT_SIGSTAT (SIGRTMIN + 2)
-#define RT_SIGPROF (SIGRTMIN + 3)
 
 /* Macros for manipulating struct timespec from <time.h> */
 #define ms2ns(x) (1000000 * (x))
@@ -218,6 +372,12 @@ extern "C"
     (x).tv_sec -= (y).tv_sec; \
     (x).tv_nsec -= (y).tv_nsec; \
 }}} /* TS_SUBTRACT */
+
+/**
+ * @brief Let the current process enter traced state.
+ * @return true on success
+ */
+bool trace_me(void);
 
 /**
  * @param[in] type any of the constant values defined in \c event_type_t

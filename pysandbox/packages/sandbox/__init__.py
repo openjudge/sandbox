@@ -64,11 +64,11 @@ class Sandbox(_sandbox.Sandbox):
         # __new__() method rather than in __init__(). And initialized sandbox 
         # objects expose new *policy* attributes to support policy assignment.
         # While this ensures the atomicity of sandbox initialization, it also 
-        # breaks backward compatiblity with applications that subclass Sandbox
+        # breaks backward compatibility with applications that subclass Sandbox
         # and monkey-patch the *policy* argument in down-stream __init__() 
         # methods. The following code assumes the old-style *policy patching*, 
         # and emulates it with the new-style *policy assignment*.
-        super(Sandbox, self).__init__(*args, **kwds)
+        super(Sandbox, self).__init__()
         if 'policy' in kwds:
             if isinstance(kwds['policy'], SandboxPolicy):
                 self.policy = kwds['policy']
@@ -132,13 +132,13 @@ additionally contains the following entries,
         data = super(Sandbox, self).probe()
         if data and compatible:
             # cpu_info
-            ctime, utime, stime, tsc = data['cpu_info']
+            ctime, utime, stime, tsc = data['cpu_info'][:4]
             data['cpu'] = ctime
             data['cpu.usr'] = utime
             data['cpu.sys'] = stime
             data['cpu.tsc'] = tsc
             # mem_info
-            vm, vmpeak, rss, rsspeak, minflt, majflt = data['mem_info']
+            vm, vmpeak, rss, rsspeak, minflt, majflt = data['mem_info'][:6]
             data['mem.vsize'] = vmpeak
             data['mem.rss'] = rsspeak
             data['mem.minflt'] = minflt
@@ -177,9 +177,6 @@ S_STATUS_RDY           = Sandbox.S_STATUS_RDY
 S_STATUS_EXE           = Sandbox.S_STATUS_EXE
 S_STATUS_BLK           = Sandbox.S_STATUS_BLK
 S_STATUS_FIN           = Sandbox.S_STATUS_FIN
-S_STATUS_S0            = Sandbox.S_STATUS_S0
-S_STATUS_S1            = Sandbox.S_STATUS_S1
-S_STATUS_S2            = Sandbox.S_STATUS_S2
 
 # sandbox native results
 S_RESULT_PD            = Sandbox.S_RESULT_PD

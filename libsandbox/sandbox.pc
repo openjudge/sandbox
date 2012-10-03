@@ -33,12 +33,12 @@
 
 prefix=/usr
 exec_prefix=${prefix}
-libdir=${exec_prefix}/lib
+libdir=${exec_prefix}/lib64
 includedir=${prefix}/include
 modules=1
 
 Name: libsandbox
-Version: 0.3.4
+Version: 0.3.5
 Description: The Sandbox Libraries
 Requires:
 Libs: -L${libdir} -lsandbox

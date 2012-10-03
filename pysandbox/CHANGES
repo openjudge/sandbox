@@ -1,3 +1,15 @@
+[2012/09/04] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.c fixed early unlock in Sandbox_traverse()
+
+[2012/08/29] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.c optimized string dump in Sandbox_dump()
+  * in sandbox/module.c removed redundant exception generation
+
+[2012/08/20] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.c applied new LOCK/UNLOCK macros for concurrency control
+  * in sandbox/module.c changed status and result attributes of Sandbox from
+    instance members to getter methods
+
 [2012/07/19] LIU Yu, <pineapple.liu@gmail.com>
   * in sandbox/module.c added new attributes owner and group to Sandbox
 

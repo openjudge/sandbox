@@ -37,7 +37,7 @@
 
 #include <pthread.h>            /* pthread_t */
 #include <stdbool.h>            /* false, true */
-#include <signal.h>             /* siginfo_t, SIGTRAP */
+#include <signal.h>             /* siginfo_t, SIGTRAP, ... */
 #include <sys/types.h>          /* pid_t */
 #ifdef __linux__
 #include <sys/reg.h>            /* EAX, EBX, ... */
@@ -126,8 +126,8 @@ typedef struct
     unsigned long end_code;     /**< end address of the code segment */
     unsigned long start_stack;  /**< start address of the stack */
     struct user_regs_struct regs; /**< registers */
-    siginfo_t siginfo;          /**< signal information */
 #endif /* __linux__ */
+    siginfo_t siginfo;          /**< signal information */
     struct 
     {
         unsigned char single_step:1;
@@ -157,12 +157,12 @@ typedef struct
  * @return 0 for native type, 1, 2, ... for valid alternative types, and 
  * \c SCMODE_MAX for unknown type
  */
-int syscall_mode(proc_t * const);
+int proc_syscall_mode(proc_t * const);
 
 #define THE_SCMODE(pproc) \
     RVAL_IF(!((pproc)->tflags.is_in_syscall) && \
             ((pproc)->tflags.not_wait_execve)) \
-        (pproc)->tflags.syscall_mode = syscall_mode(pproc) \
+        (pproc)->tflags.syscall_mode = proc_syscall_mode(pproc) \
     RVAL_ELSE \
         (pproc)->tflags.syscall_mode \
     RVAL_FI \
@@ -424,19 +424,6 @@ typedef enum
 } trace_type_t;
 
 /**
- * @brief Let the current process enter traced state.
- * @return true on success
- */
-bool trace_self(void);
-
-/**
- * @brief Hack the traced process to ensure safe tracing.
- * @param[in,out] pproc pointer to a binded process stat buffer
- * @return true on success
- */
-bool trace_hack(proc_t * const pproc);
-
-/**
  * @brief Schedule next stop for a traced process.
  * @param[in,out] pproc pointer to a binded process stat buffer
  * @param[in] type \c TRACE_SYSTEM_CALL or \c TRACE_SINGLE_STEP
@@ -453,18 +440,26 @@ bool trace_next(proc_t * const pproc, trace_type_t type);
 bool trace_kill(proc_t * const pproc, int signal);
 
 /**
- * @brief Main thread that actually performs trace_*() functions.
- * @param[in,out] psbox pointer to an initialized sandbox
- * @return the same pointer as input
- */
-void * trace_main(void * const psbox);
-
-/**
- * @brief Terminate a traced process and quit trace_main().
+ * @brief Terminate a traced process and quit sandbox_tracer().
  * @param[in] pproc pointer to a binded process stat buffer
  * @return true on success
  */
 bool trace_end(const proc_t * const pproc);
+
+/**
+ * @brief Create a \c timer_t object with notification signal and frequency.
+ * @param[in] signo send signal \c signo to notify the calling thread
+ * @param[in] freq frequency of notification
+ * @return an initialized \c timer_t object, set \c errno if any error occurs.
+ */
+timer_t sandbox_timer(int signo, int freq);
+
+/**
+ * @brief Service thread that actually performs trace_*() operations.
+ * @param[in,out] psbox pointer to an initialized sandbox
+ * @return the same pointer as input
+ */
+void * sandbox_tracer(void * const psbox);
 
 /**
  * @brief Evict the existing blocks from the data caches.

@@ -23,50 +23,24 @@ FEATURES
      from critical parts of the operating system;
 
 INSTALLATION
-
-  Note, there is no need to install 32bit packages on x86_64 systems. The 64bit 
-  libsandbox and pysandbox can handle both 32bit and 64bit binary programs.
   
-  binary packages (CentOS/RedHat)
+  Note, there is no need to install 32bit package(s) on x86_64 systems. The 
+  64bit libsandbox can handle both 32bit and 64bit binary programs.
+  
+  binary package (CentOS/RedHat)
   
   $ yum install --nogpgcheck libsandbox-<version>.<platform>.rpm
-  $ yum install --nogpgcheck pysandbox-<version>.<platform>.rpm
   
-  binary packages (Ubuntu)
+  binary package (Ubuntu)
   
   $ dpkg -i libsandbox_<version>_<platform>.deb
-  $ dpkg -i pysandbox_<version>_<platform>.deb
   
-  source packages
+  source package
   
   $ tar -xzf libsandbox-<version>.tar.gz
   $ cd libsandbox-<version>
   $ ./configure
   $ sudo make install
-  
-  $ tar -xzvf pysandbox-<version>.tar.gz
-  $ cd pysandbox-<version>
-  $ python setup.py build
-  $ sudo python setup.py install
-
-GETTING STARTED
-  
-  The simplest way to get started with the sandbox libraries is to invoke the 
-  Pythonic wrapper (aka. pysandbox) through the interactive Python interpreter.
-  
-  $ python
-  >>> from sandbox import *
-  >>> s = Sandbox(['/foo/bar.exe', 'arg1', 'arg2'])
-  >>> s.run()
-  ...
-  >>> s.probe()
-  ...
-  
-  For a more elaborate example, refer to the sample Python script sample2.py. It 
-  demonstrates essential functionalities of pysandbox including I/O redirection, 
-  resource quota limitation, and white-list system call interception.
-  
-  $ python sample2.py
 
 SPECIAL NOTICES
   

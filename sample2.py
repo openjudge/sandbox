@@ -101,7 +101,7 @@ class MiniSandbox(SandboxPolicy,Sandbox):
     def __call__(self, e, a):
         # handle SYSCALL/SYSRET events with local rules
         if e.type in (S_EVENT_SYSCALL, S_EVENT_SYSRET):
-            if machine is 'x86_64' and e.ext0 is not 0:
+            if machine == 'x86_64' and e.ext0 != 0:
                 return self._KILL_RF(e, a)
             return self.sc_table[e.data](e, a)
         # bypass other events to base class

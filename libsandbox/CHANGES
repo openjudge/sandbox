@@ -1,3 +1,9 @@
+[2012/10/08] LIU Yu, <pineapple.liu@gmail.com>
+  * in platform.h fixed x86_64 syscall abi (4th argument)
+
+[2012/10/05] LIU Yu, <pineapple.liu@gmail.com>
+  * in Makefile.in reordered linker arguments to resolve a gcc linking error
+
 [2012/08/31] LIU Yu, <pineapple.liu@gmail.com>
   * revoked the use of real-time signals, RT_SIGTERM (SIGRTMIN + 1) -> SIGEXIT
     (SIGUSR1), RT_SIGSTAT (SIGRTMIN + 2) -> SIGSTAT (SIGUSR2), RT_SIGPROF ->

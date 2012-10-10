@@ -79,9 +79,10 @@ def main(args):
 # mini sandbox with embedded policy
 class MiniSandbox(SandboxPolicy,Sandbox):
     sc_table = None
-    sc_safe = dict(i686 = set([3, 4, 19, 45, 54, 90, 91, 122, 125, 140, 163, \
-        192, 197, 224, 243, 252, ]), x86_64 = set([0, 1, 5, 8, 9, 10, 11, 12, \
-        16, 25, 63, 158, 231, ]), ) # white list of essential linux syscalls
+    # white list of essential linux syscalls for statically-linked C programs
+    sc_safe = dict(i686 = set([0, 3, 4, 19, 45, 54, 90, 91, 122, 125, 140, \
+        163, 192, 197, 224, 243, 252, ]), x86_64 = set([0, 1, 5, 8, 9, 10, \
+        11, 12, 16, 25, 63, 158, 219, 231, ]), )
     def __init__(self, *args, **kwds):
         # initialize table of system call rules
         self.sc_table = [self._KILL_RF, ] * 1024
@@ -112,6 +113,7 @@ class MiniSandbox(SandboxPolicy,Sandbox):
     def _KILL_RF(self, e, a): # restricted func.
         a.type, a.data = S_ACTION_KILL, S_RESULT_RF
         return a
+    pass
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

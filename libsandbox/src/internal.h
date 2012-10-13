@@ -355,23 +355,40 @@ void * sandbox_manager(sandbox_pool_t * const pool);
 /* Macros for manipulating struct timespec from <time.h> */
 #define ms2ns(x) (1000000 * (x))
 #define ts2ms(x) ((((x).tv_sec) * 1000) + (((x).tv_nsec) / 1000000))
-#define TS_SUBTRACT(x,y) \
+
+#define ts_less(x,y) \
+    RVAL_IF((x).tv_sec < (y).tv_sec) \
+        true \
+    RVAL_ELSE \
+        RVAL_IF(((x).tv_sec == (y).tv_sec) && ((x).tv_nsec < (y).tv_nsec)) \
+            true \
+        RVAL_ELSE \
+            false \
+        RVAL_FI \
+    RVAL_FI \
+/* ts_less */
+
+#define ts_inplace_add(x,y) \
 {{{ \
-    if ((x).tv_nsec < (y).tv_nsec) \
+    (x).tv_sec += (y).tv_sec; \
+    (x).tv_nsec += (y).tv_nsec; \
+    while ((x).tv_nsec >= ms2ns(1000)) \
     { \
-        long sec = 1 + ((y).tv_nsec - (x).tv_nsec) / ms2ns(1000); \
-        (x).tv_sec -= sec; \
-        (x).tv_nsec += ms2ns(1000 * sec); \
+        ++(x).tv_sec; \
+        (x).tv_nsec -= ms2ns(1000); \
     } \
-    if ((x).tv_nsec - (y).tv_nsec >= ms2ns(1000)) \
-    { \
-        long sec = ((y).tv_nsec - (x).tv_nsec) / ms2ns(1000); \
-        (x).tv_nsec -= ms2ns(1000 * sec); \
-        (x).tv_sec += sec; \
-    } \
+}}} /* ts_inplace_add */
+
+#define ts_inplace_sub(x,y) \
+{{{ \
     (x).tv_sec -= (y).tv_sec; \
     (x).tv_nsec -= (y).tv_nsec; \
-}}} /* TS_SUBTRACT */
+    while ((x).tv_nsec < 0) \
+    { \
+        --(x).tv_sec; \
+        (x).tv_nsec += ms2ns(1000); \
+    } \
+}}} /* ts_inplace_sub */
 
 /**
  * @brief Let the current process enter traced state.

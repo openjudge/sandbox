@@ -447,14 +447,6 @@ bool trace_kill(proc_t * const pproc, int signal);
 bool trace_end(const proc_t * const pproc);
 
 /**
- * @brief Create a \c timer_t object with notification signal and frequency.
- * @param[in] signo send signal \c signo to notify the calling thread
- * @param[in] freq frequency of notification
- * @return an initialized \c timer_t object, set \c errno if any error occurs.
- */
-timer_t sandbox_timer(int signo, int freq);
-
-/**
  * @brief Service thread that actually performs trace_*() operations.
  * @param[in,out] psbox pointer to an initialized sandbox
  * @return the same pointer as input

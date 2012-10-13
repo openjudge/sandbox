@@ -46,7 +46,6 @@
 #include <stdlib.h>             /* malloc(), free() */
 #include <string.h>             /* memset(), strsep() */
 #include <sys/queue.h>          /* SLIST_*() */
-#include <sys/syscall.h>        /* syscall(), SYS_gettid */
 #include <sys/types.h>          /* off_t */
 #include <sys/times.h>          /* struct tms, struct timeval */
 #include <unistd.h>             /* access(), lseek(), {R,F}_OK */
@@ -171,23 +170,24 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
     buffer[len] = '\0';
     
     /* Extract interested information */
-    struct tms tm;
+    struct tms tm = (struct tms){0, 0};
     int offset = 0;
     char * token = buffer;
     do
     {
+        errno = 0;
         switch (offset++)
         {
         case  0:                /* pid */
-            sscanf(token, "%d", &pproc->pid);
+            pproc->pid = atoi(token);
             break;
         case  1:                /* comm */
             break;
         case  2:                /* state */
-            sscanf(token, "%c", &pproc->state);
+            pproc->state = token[0];
             break;
         case  3:                /* ppid */
-            sscanf(token, "%d", &pproc->ppid);
+            pproc->ppid = atoi(token);
             break;
         case  4:                /* pgrp */
         case  5:                /* session */
@@ -195,23 +195,23 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
         case  7:                /* tty_pgrp */
             break;
         case  8:                /* flags */
-            sscanf(token, "%lu", &pproc->flags);
+            pproc->flags = strtoul(token, NULL, 10);
             break;
         case  9:                /* min_flt */
-            sscanf(token, "%lu", &pproc->minflt);
+            pproc->minflt = strtoul(token, NULL, 10);
             break;
         case 10:                /* cmin_flt */
             break;
         case 11:                /* maj_flt */
-            sscanf(token, "%lu", &pproc->majflt);
+            pproc->majflt = strtoul(token, NULL, 10);
             break;
         case 12:                /* cmaj_flt */
             break;
         case 13:                /* utime */
-            sscanf(token, "%lu", &tm.tms_utime);
+            tm.tms_utime = strtoul(token, NULL, 10);
             break;
         case 14:                /* stime */
-            sscanf(token, "%lu", &tm.tms_stime);
+            tm.tms_stime = strtoul(token, NULL, 10);
             break;
         case 15:                /* cutime */
         case 16:                /* cstime */
@@ -222,20 +222,20 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
         case 21:                /* start_time */
             break;
         case 22:                /* vsize */
-            sscanf(token, "%lu", &pproc->vsize);
+            pproc->vsize = strtoul(token, NULL, 10);
             break;
         case 23:                /* rss */
-            sscanf(token, "%ld", &pproc->rss);
+            pproc->rss = strtol(token, NULL, 10);
             break;
         case 24:                /* rlim_rss */
         case 25:                /* start_code */
-            sscanf(token, "%lu", &pproc->start_code);
+            pproc->start_code = strtoul(token, NULL, 10);
             break;
         case 26:                /* end_code */
-            sscanf(token, "%lu", &pproc->end_code);
+            pproc->end_code = strtoul(token, NULL, 10);
             break;
         case 27:                /* start_stack */
-            sscanf(token, "%lu", &pproc->start_stack);
+            pproc->start_stack = strtoul(token, NULL, 10);
             break;
         case 28:                /* esp */
         case 29:                /* eip */
@@ -252,6 +252,11 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
         case 40:                /* policy */
         default:
             break;
+        }
+        if (errno != 0)
+        {
+            WARN("failed to parse stat from procfs");
+            FUNC_RET("%d", false);
         }
     } while (strsep(&token, " ") != NULL);
     
@@ -771,7 +776,6 @@ sandbox_tracer(void * const dummy)
         FUNC_RET("%p", (void *)NULL);
     }
     
-#ifdef WITH_TRACE_POOL
     /* Register sandbox to the pool */
     P(&global_mutex);
     sandbox_ref_t * item = (sandbox_ref_t *)malloc(sizeof(sandbox_ref_t));
@@ -779,7 +783,6 @@ sandbox_tracer(void * const dummy)
     SLIST_INSERT_HEAD(&sandbox_pool, item, entries);
     DBUG("registered sandbox %p to the pool", psbox);
     V(&global_mutex);
-#endif /* WITH_TRACE_POOL */
     
     /* Detect and perform options while the sandbox is running */
     bool end = false;
@@ -828,7 +831,6 @@ sandbox_tracer(void * const dummy)
     }
     V(&global_mutex);
     
-#ifdef WITH_TRACE_POOL
     /* Remove sandbox from the pool */
     P(&global_mutex);
     assert(item);
@@ -836,7 +838,6 @@ sandbox_tracer(void * const dummy)
     free(item);
     DBUG("removed sandbox %p from the pool", psbox);
     V(&global_mutex);
-#endif /* WITH_TRACE_POOL */
     
     FUNC_RET("%p", (void *)&psbox->result);
 }
@@ -893,40 +894,6 @@ check_procfs(pid_t pid)
 
 #endif /* HAVE_PROCFS */
 
-timer_t
-sandbox_timer(int signo, int freq)
-{
-    FUNC_BEGIN("%d,%d", signo, freq);
-    assert((signo > 0) && (freq > 0));
-    
-    timer_t timer;
-    
-    struct sigevent sev;
-    memset(&sev, 0, sizeof(struct sigevent));
-    sev.sigev_value.sival_ptr = &timer;
-    sev.sigev_signo = signo;
-    sev.sigev_notify = SIGEV_THREAD_ID;
-    sev.sigev_notify_thread_id = syscall(SYS_gettid);
-    
-    if (timer_create(CLOCK_MONOTONIC, &sev, &timer) != 0)
-    {
-        FUNC_RET(timer);
-    }
-    
-    struct itimerspec its;
-    its.it_interval.tv_sec = 0;
-    its.it_interval.tv_nsec = ms2ns(1000 / freq);
-    its.it_value.tv_sec = 0;
-    its.it_value.tv_nsec = ms2ns(20); // warmup time
-    
-    if (timer_settime(timer, 0, &its, NULL) != 0)
-    {
-        FUNC_RET(timer);
-    }
-    
-    FUNC_RET(timer);
-}
-
 void
 sandbox_notify(sandbox_t * const psbox, int signo)
 {
@@ -961,12 +928,7 @@ sandbox_notify(sandbox_t * const psbox, int signo)
 
 static sigset_t sigmask;
 static sigset_t oldmask;
-
-#ifdef WITH_TRACE_POOL
-
 static pthread_t manager;
-
-#endif /* WITH_TRACE_POOL */
 
 static __attribute__((constructor)) void 
 init(void)
@@ -991,16 +953,12 @@ init(void)
     }
     DBUG("blocked reserved signals");
     
-#ifdef WITH_TRACE_POOL
-    
     if (pthread_create(&manager, NULL, (thread_func_t)sandbox_manager, 
         (void *)&sandbox_pool) != 0)
     {
         WARN("failed to create the manager thread at %p", sandbox_manager);
     }
     DBUG("created the manager thread at %p", sandbox_manager);
-    
-#endif /* WITH_TRACE_POOL */
     
     PROC_END();
 }
@@ -1010,8 +968,6 @@ fini(void)
 {
     PROC_BEGIN();
     
-#ifdef WITH_TRACE_POOL
-
     pthread_kill(manager, SIGEXIT);
     if (pthread_join(manager, NULL) != 0)
     {
@@ -1037,8 +993,6 @@ fini(void)
         free(item);
     }
     V(&global_mutex);
-    
-#endif /* WITH_TRACE_POOL */
     
     /* All sandbox instances should have been stopped at this point. Any 
      * pending signal in the reserved set is safe to be ignored. This step is 

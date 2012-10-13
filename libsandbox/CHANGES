@@ -1,3 +1,9 @@
+[2012/10/13] LIU Yu, <pineapple.liu@gmail.com>
+  * the global trace pool is now implicit rather than an optional feature.
+  * in sandbox.c optimized sandbox_manager() to reduce memory footprint.
+  * in platform.{h,c} removed sandbox_timer() and optimized proc_probe().
+  * in configure.in updated version to 0.3.5-2
+
 [2012/10/08] LIU Yu, <pineapple.liu@gmail.com>
   * in platform.h fixed x86_64 syscall abi (4th argument)
 

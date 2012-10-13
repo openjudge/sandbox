@@ -704,7 +704,6 @@ enable_option_checking
 enable_debug
 enable_cachesz
 enable_tsc
-enable_pool
 enable_chkvsc
 enable_rtsched
 '
@@ -1341,7 +1340,6 @@ Optional Features:
   --enable-debug          turn on debugging messages
   --enable-cachesz=SIZE   L2 cache size (in bytes) of targeted platform
   --enable-tsc            collect software tsc (time-stamp counter) statistics
-  --enable-pool           use a pool manager to trace all sandbox instances
   --enable-chkvsc         inspect system call mode from vsyscall opcode
   --enable-rtsched        use real-time scheduling policy if possible
 
@@ -1802,7 +1800,7 @@ ac_link='$CC -o conftest$ac_exeext $CFLAGS $CPPFLAGS $LDFLAGS conftest.$ac_ext $
 ac_compiler_gnu=$ac_cv_c_compiler_gnu
 
 
-PACKAGE_RELEASE="1"
+PACKAGE_RELEASE="2"
 
 PACKAGE_BRIEF="The Sandbox Libraries"
 
@@ -1827,7 +1825,6 @@ with_debug=no
 with_cachesz=no
 with_tsc=no
 with_chkvsc=no
-with_pool=no
 with_rtsched=no
 
 # Check whether --enable-debug was given.
@@ -1843,11 +1840,6 @@ fi
 # Check whether --enable-tsc was given.
 if test "${enable_tsc+set}" = set; then
   enableval=$enable_tsc; with_tsc=yes
-fi
-
-# Check whether --enable-pool was given.
-if test "${enable_pool+set}" = set; then
-  enableval=$enable_pool; with_pool=yes
 fi
 
 # Check whether --enable-chkvsc was given.
@@ -1879,11 +1871,6 @@ fi
 if test "x$with_cachesz" == xyes; then
     CFLAGS="$CFLAGS -D CACHE_SIZE=$enable_cachesz"
     PACKAGE_CONFIG="$PACKAGE_CONFIG --enable-cachesz=$enable_cachesz"
-fi
-
-if test "x$with_pool" == xyes; then
-    CFLAGS="$CFLAGS -D WITH_TRACE_POOL"
-    PACKAGE_CONFIG="$PACKAGE_CONFIG --enable-pool"
 fi
 
 if test "x$with_tsc" == xyes; then
@@ -3227,8 +3214,8 @@ fi
 # Checks for libraries.
 
 
-{ $as_echo "$as_me:$LINENO: checking for clock_getcpuclockid, clock_create, clock_gettime, timer_create, timer_settime, timer_delete in -lrt" >&5
-$as_echo_n "checking for clock_getcpuclockid, clock_create, clock_gettime, timer_create, timer_settime, timer_delete in -lrt... " >&6; }
+{ $as_echo "$as_me:$LINENO: checking for clock_getcpuclockid, clock_create, clock_gettime, clock_getres in -lrt" >&5
+$as_echo_n "checking for clock_getcpuclockid, clock_create, clock_gettime, clock_getres in -lrt... " >&6; }
 if test "${ac_cv_lib_rt_clock_getcpuclockid+set}" = set; then
   $as_echo_n "(cached) " >&6
 else
@@ -3247,11 +3234,11 @@ cat >>conftest.$ac_ext <<_ACEOF
 #ifdef __cplusplus
 extern "C"
 #endif
-char clock_getcpuclockid, clock_create, clock_gettime, timer_create, timer_settime, timer_delete ();
+char clock_getcpuclockid, clock_create, clock_gettime, clock_getres ();
 int
 main ()
 {
-return clock_getcpuclockid, clock_create, clock_gettime, timer_create, timer_settime, timer_delete ();
+return clock_getcpuclockid, clock_create, clock_gettime, clock_getres ();
   ;
   return 0;
 }
@@ -5628,8 +5615,7 @@ done
 
 
 
-
-for ac_func in access chdir chroot execve exit getrlimit getpagesize kill ptrace statfs syscall sysconf waitid setrlimit
+for ac_func in access chdir chroot execve exit getrlimit getpagesize kill ptrace statfs sysconf waitid setrlimit
 do
 as_ac_var=`$as_echo "ac_cv_func_$ac_func" | $as_tr_sh`
 { $as_echo "$as_me:$LINENO: checking for $ac_func" >&5

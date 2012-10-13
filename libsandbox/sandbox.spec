@@ -34,7 +34,7 @@
 %define sbox sandbox
 %define name lib%{sbox}
 %define version 0.3.5
-%define release 1
+%define release 2
 
 Summary: The Sandbox Libraries
 Name: %{name}
@@ -66,7 +66,7 @@ programmable policies.
 
 %prep
 %setup
-./configure --prefix=%{buildroot}%{_prefix} --libdir=%{buildroot}%{_libdir} --includedir=%{buildroot}%{_includedir}  --enable-chkvsc --enable-pool
+./configure --prefix=%{buildroot}%{_prefix} --libdir=%{buildroot}%{_libdir} --includedir=%{buildroot}%{_includedir}  --enable-chkvsc
 
 %build
 make

@@ -32,9 +32,9 @@
 # POSSIBILITY OF SUCH DAMAGE.                                                  #
 ################################################################################
 """The sandbox libraries (libsandbox & pysandbox) provide API's in C/C++ and Python
-for executing and profiling simple (single process) programs in a restricted 
-environment, or sandbox. These API's can help developers to build automated 
-profiling tools and watchdogs that capture and block the runtime behaviours of 
+for executing and profiling simple (single process) programs in a restricted
+environment, or sandbox. These API's can help developers to build automated
+profiling tools and watchdogs that capture and block the runtime behaviours of
 binary programs according to configurable / programmable policies."""
 
 from distutils.core import setup, Extension
@@ -62,37 +62,35 @@ except ImportError:
 
 try:
     pkgconfig = ['pkg-config', '--silence-errors', 'libsandbox']
-    core_ccflags = check_output(pkgconfig + ['--cflags', ]).decode().split()
-    core_ldflags = check_output(pkgconfig + ['--libs', ]).decode().split()
+    ccflags = check_output(pkgconfig + ['--cflags', ]).decode().split()
+    ldflags = check_output(pkgconfig + ['--libs', ]).decode().split()
 except:
-    core_ccflags = ['-pthread', ]
-    core_ldflags = ['-lsandbox', '-lrt']
+    ccflags = ['-pthread', ]
+    ldflags = ['-lsandbox', '-lrt']
 
 _sandbox = Extension('_sandbox',
     language='c',
-    define_macros=[('SANDBOX', None), 
-                   ('NDEBUG', None), 
-                   ('AUTHOR', '"%s <%s>"' % \
-                   (AUTHOR, AUTHOR_EMAIL)), 
-                   ('VERSION', '"%s-%s"' % \
-                   (VERSION, RELEASE))],
-    undef_macros=['DEBUG'], 
-    extra_compile_args=['-Wall', '-g0', '-O3', '-Wno-write-strings'] + core_ccflags, 
-    extra_link_args=[] + core_ldflags, 
-    include_dirs=[join('packages', 'sandbox'), ], 
+    define_macros=[('SANDBOX', None),
+                   ('NDEBUG', None),
+                   ('AUTHOR', '"%s <%s>"' % (AUTHOR, AUTHOR_EMAIL)),
+                   ('VERSION', '"%s-%s"' % (VERSION, RELEASE))],
+    undef_macros=['DEBUG'],
+    extra_compile_args=['-Wall', '-g0', '-O3', '-Wno-write-strings'] + ccflags,
+    extra_link_args=[] + ldflags,
+    include_dirs=[join('packages', 'sandbox'), ],
     sources=glob(join('packages', 'sandbox', '*.c')))
 
-setup(name=NAME, 
-      version=VERSION, 
-      description=DESCRIPTION, 
-      long_description=__doc__, 
-      author=AUTHOR, 
-      author_email=AUTHOR_EMAIL, 
-      maintainer=MAINTAINER, 
-      maintainer_email=MAINTAINER_EMAIL, 
-      license=LICENSE, 
-      url=URL, 
-      package_dir = {'sandbox': join('packages', 'sandbox'), },
-      packages=['sandbox', ], 
+setup(name=NAME,
+      version=VERSION,
+      description=DESCRIPTION,
+      long_description=__doc__,
+      author=AUTHOR,
+      author_email=AUTHOR_EMAIL,
+      maintainer=MAINTAINER,
+      maintainer_email=MAINTAINER_EMAIL,
+      license=LICENSE,
+      url=URL,
+      package_dir={'sandbox': join('packages', 'sandbox'), },
+      packages=['sandbox', ],
       ext_package='sandbox',
       ext_modules=[_sandbox, ])

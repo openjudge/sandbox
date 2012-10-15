@@ -52,10 +52,12 @@ except AssertionError as e:
     sys.stderr.write(str(e))
     sys.exit(os.EX_UNAVAILABLE)
 
+
 # result code translation
 def result_name(r):
     return ('PD', 'OK', 'RF', 'ML', 'OL', 'TL', 'RT', 'AT', 'IE', 'BP')[r] \
         if r in range(10) else None
+
 
 def main(args):
     # sandbox configuration
@@ -64,25 +66,27 @@ def main(args):
         'stdin': sys.stdin,             # input to targeted program
         'stdout': sys.stdout,           # output from targeted program
         'stderr': sys.stderr,           # error from targeted program
-        'quota': dict(wallclock = 30000,# 30 sec
-                      cpu = 2000,       #  2 sec
-                      memory = 8388608, #  8 MB
-                      disk = 1048576)}  #  1 MB
+        'quota': dict(wallclock=30000,  # 30 sec
+                      cpu=2000,         # 2 sec
+                      memory=8388608,   # 8 MB
+                      disk=1048576)}    # 1 MB
     # create a sandbox instance and execute till end
     msb = MiniSandbox(**cookbook)
     msb.run()
     # verbose statistics
-    sys.stderr.write("result: %(result)s\ncpu: %(cpu)dms\nmem: %(mem)dkB\n" % \
+    sys.stderr.write("result: %(result)s\ncpu: %(cpu)dms\nmem: %(mem)dkB\n" %
         msb.probe())
     return os.EX_OK
 
+
 # mini sandbox with embedded policy
-class MiniSandbox(SandboxPolicy,Sandbox):
+class MiniSandbox(SandboxPolicy, Sandbox):
     sc_table = None
     # white list of essential linux syscalls for statically-linked C programs
-    sc_safe = dict(i686 = set([0, 3, 4, 19, 45, 54, 90, 91, 122, 125, 140, \
-        163, 192, 197, 224, 243, 252, ]), x86_64 = set([0, 1, 5, 8, 9, 10, \
+    sc_safe = dict(i686=set([0, 3, 4, 19, 45, 54, 90, 91, 122, 125, 140,
+        163, 192, 197, 224, 243, 252, ]), x86_64=set([0, 1, 5, 8, 9, 10,
         11, 12, 16, 25, 63, 158, 219, 231, ]), )
+
     def __init__(self, *args, **kwds):
         # initialize table of system call rules
         self.sc_table = [self._KILL_RF, ] * 1024
@@ -92,6 +96,7 @@ class MiniSandbox(SandboxPolicy,Sandbox):
         SandboxPolicy.__init__(self)
         Sandbox.__init__(self, *args, **kwds)
         self.policy = self
+
     def probe(self):
         # add custom entries into the probe dict
         d = Sandbox.probe(self, False)
@@ -99,6 +104,7 @@ class MiniSandbox(SandboxPolicy,Sandbox):
         d['mem'] = d['mem_info'][1]
         d['result'] = result_name(self.result)
         return d
+
     def __call__(self, e, a):
         # handle SYSCALL/SYSRET events with local rules
         if e.type in (S_EVENT_SYSCALL, S_EVENT_SYSRET):
@@ -107,13 +113,16 @@ class MiniSandbox(SandboxPolicy,Sandbox):
             return self.sc_table[e.data](e, a)
         # bypass other events to base class
         return SandboxPolicy.__call__(self, e, a)
-    def _CONT(self, e, a): # continue
+
+    def _CONT(self, e, a):  # continue
         a.type = S_ACTION_CONT
         return a
-    def _KILL_RF(self, e, a): # restricted func.
+
+    def _KILL_RF(self, e, a):  # restricted func.
         a.type, a.data = S_ACTION_KILL, S_RESULT_RF
         return a
     pass
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

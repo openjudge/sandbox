@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2004-2009, 2011, 2012 LIU Yu, pineapple.liu@gmail.com         *
+ * Copyright (C) 2004-2009, 2011-2013 LIU Yu, pineapple.liu@gmail.com          *
  * All rights reserved.                                                        *
  *                                                                             *
  * Redistribution and use in source and binary forms, with or without          *
@@ -792,6 +792,7 @@ __sandbox_ctrl_init(ctrl_t * pctrl, thread_func_t tft)
     pctrl->policy.entry = (void *)sandbox_default_policy;
     pctrl->policy.data = 0L;
     memset(pctrl->monitor, 0, (SBOX_MONITOR_MAX) * sizeof(worker_t));
+    memset(&pctrl->tracer, 0, sizeof(worker_t));
     pctrl->tracer.target = tft;
     __QUEUE_CLEAR(pctrl);
     
@@ -806,6 +807,7 @@ __sandbox_ctrl_fini(ctrl_t * pctrl)
     
     __QUEUE_CLEAR(pctrl);
     pctrl->tracer.target = NULL;
+    memset(&pctrl->tracer, 0, sizeof(worker_t));
     memset(pctrl->monitor, 0, (SBOX_MONITOR_MAX) * sizeof(worker_t));
     
     PROC_END();
@@ -837,7 +839,7 @@ sandbox_watcher(sandbox_t * psbox)
     
     /* Temporary variables. */
     LOCK(psbox, SH);
-    const pthread_t profiler = psbox->ctrl.monitor[0].tid;
+    const pthread_t profiler_thread = psbox->ctrl.monitor[0].tid;
     const pid_t pid = psbox->ctrl.pid;
     ctrl_t * const pctrl = &psbox->ctrl;
     proc_t proc = {0};
@@ -849,9 +851,6 @@ sandbox_watcher(sandbox_t * psbox)
     int w_res = 0;
     long sc_stack[8] = {0};
     int sc_top = 0;
-    
-    /* Clear cache in order to increase timing accuracy */
-    cache_flush();
     
     /* Entering the watching loop */
     while ((w_res = waitid(P_PID, pid, &w_info, w_opt)) >= 0)
@@ -991,40 +990,7 @@ sandbox_watcher(sandbox_t * psbox)
         }
         
         /* Notify the profiler thread to collect and examine stat */
-        pthread_kill(profiler, SIGSTAT);
-        
-        /* Out-of-quota (memory) events always happen on the return of relevant
-         * system calls, i.e. brk(), mmap(), etc. So we perform memory usage
-         * profiling as follows rather than in the profiler thread. */
-        {
-            LOCK(psbox, EX);
-            
-            /* mem_info */
-            #define MEM_UPDATE(a,b) \
-            {{{ \
-                (a) = (b); \
-                (a ## _peak) = (((a ## _peak) > (a)) ? (a ## _peak) : (a)); \
-            }}} /* MEM_UPDATE */
-            
-            MEM_UPDATE(psbox->stat.mem_info.vsize, proc.vsize);
-            MEM_UPDATE(psbox->stat.mem_info.rss, proc.rss * getpagesize());
-            psbox->stat.mem_info.minflt = proc.minflt;
-            psbox->stat.mem_info.majflt = proc.majflt;
-            
-            /* Compare memory usage against quota limit, raise out-of-quota 
-             * (memory) event when necessary. */
-            if (psbox->stat.mem_info.vsize_peak > \
-                psbox->task.quota[S_QUOTA_MEMORY])
-            {
-                DBUG("memory quota exceeded");
-                UNLOCK(psbox);
-                POST_EVENT(psbox, _QUOTA, S_QUOTA_MEMORY);
-            }
-            else
-            {
-                UNLOCK(psbox);
-            }
-        }
+        pthread_kill(profiler_thread, SIGSTAT);
         
         /* Deliver pending events to the policy module for investigation */
         LOCK(psbox, SH);
@@ -1284,13 +1250,45 @@ sandbox_profiler(sandbox_t * psbox)
             /* Collect stat of the prisoner process */        
             if (!proc_probe(pid, PROBE_STAT, &proc))
             {
-                MONITOR_ERROR(psbox, "failed to probe process: %d", pid);
+                WARN("failed to probe process: %d", pid);
+                /* Do NOT raise monitor error here because the prisoner process
+                 * may have gone making proc_probe() to fail. */
                 break;
             }
             
+            /* mem_info */
             LOCK(psbox, EX);
             
+            #define MEM_UPDATE(a,b) \
+            {{{ \
+                (a) = (b); \
+                (a ## _peak) = (((a ## _peak) > (a)) ? (a ## _peak) : (a)); \
+            }}} /* MEM_UPDATE */
+            
+            MEM_UPDATE(psbox->stat.mem_info.vsize, proc.vsize);
+            MEM_UPDATE(psbox->stat.mem_info.rss, proc.rss * getpagesize());
+            psbox->stat.mem_info.minflt = proc.minflt;
+            psbox->stat.mem_info.majflt = proc.majflt;
+            
+            /* Compare memory usage against quota limit, raise out-of-quota 
+             * (memory) event when necessary. */
+            if (psbox->stat.mem_info.vsize_peak > \
+                psbox->task.quota[S_QUOTA_MEMORY])
+            {
+                DBUG("memory quota exceeded");
+                UNLOCK(psbox);
+                POST_EVENT(psbox, _QUOTA, S_QUOTA_MEMORY);
+                trace_kill(&proc, SIGSTOP);
+                trace_kill(&proc, SIGCONT);
+            }
+            else
+            {
+                UNLOCK(psbox);
+            }
+            
             /* cpu_info */
+            LOCK(psbox, EX);
+            
             #define CPU_UPDATE(a,x) \
             {{{ \
                 ((a).tv_sec) = ((((x).tv_sec) > ((a).tv_sec)) ? \
@@ -1316,7 +1314,7 @@ sandbox_profiler(sandbox_t * psbox)
             
             LOCK(psbox, EX);
             
-            ts_inplace_sub(ts, psbox->stat.started);
+            TS_INPLACE_SUB(ts, psbox->stat.started);
             psbox->stat.elapsed = ts;
             
             /* Compare elapsed time against quota limit, raise out-of-quota 
@@ -1404,178 +1402,6 @@ check_status:
     
     MONITOR_END(psbox);
 }
-
-void *
-sandbox_manager(sandbox_pool_t * const pool)
-{
-    FUNC_BEGIN("%p", pool);
-    assert(pool);
-    
-    sigset_t sigmask;
-    sigemptyset(&sigmask);
-    sigaddset(&sigmask, SIGEXIT);
-    sigaddset(&sigmask, SIGTERM);
-    sigaddset(&sigmask, SIGQUIT);
-    sigaddset(&sigmask, SIGINT);
-    
-    struct timespec cycle = (struct timespec){0, ms2ns(1000 / PROF_FREQ)};
-    struct timespec zero = (struct timespec){0, 0};
-    struct timespec eps;
-    
-    if (clock_getres(CLOCK_MONOTONIC, &eps) != 0)
-    {
-        WARN("failed to get clock resolution");
-        eps = (struct timespec){0, ms2ns(1)};
-    }
-    
-    /* Relax profiling frequencies that are too high to realize */
-    if (ts_less(cycle, eps))
-    {
-        cycle = eps;
-    }
-    
-    DBUG("profiling frequency is at %.2fHz", 1000. / ts2ms(cycle));
-    
-    /* The primary task of the manager thread is to send peroidical SIGPROF and
-     * SIGSTAT signals to all active sandbox instances. We used to raise these
-     * signals with recurring timers created by timer_create(), and propagate
-     * the signals to all active sandbox instances. However, memory profiling
-     * with Massif (http://valgrind.org/docs/manual/ms-manual.html) showed that 
-     * timer_create() may cause heap contention in multithreaded scenarios. And 
-     * it leads to the creation of new arena consuming 100MB+ memory in its own.
-     * Therefore, since 0.3.5-2, we started to use clock_nanosleep() to emulate
-     * recurring timers. The problem is to calibrate the sleep timeout, such
-     * that the time of profiling cycle converges to (1 / PROF_FREQ) second(s).
-     * That said, the manager thread is best viewed as a closed-loop control 
-     * system, where the sleep timeout is the input, the measured time is the
-     * the output, and the error of the measured time is the feedback. */
-    
-    unsigned long long pf_count = 0;
-    struct timespec timeout = zero;
-    struct timespec delta, t;
-    bool end = false;
-    
-    while (!end)
-    {
-        if (clock_gettime(CLOCK_MONOTONIC, &t) != 0)
-        {
-            WARN("failed to get current time");
-            continue;
-        }
-        
-        if ((errno = clock_nanosleep(CLOCK_MONOTONIC, 0, &timeout, NULL)) > 0)
-        {
-            WARN("failed in clock_nanosleep()");
-        }
-        
-        siginfo_t siginfo;
-        int signo;
-        if ((signo = sigtimedwait(&sigmask, &siginfo, &zero)) < 0)
-        {
-            if (errno == EAGAIN)
-            {
-                siginfo.si_code = SI_TIMER;
-                if ((pf_count++) % (PROF_FREQ / STAT_FREQ) == 0)
-                {
-                    signo = SIGPROF;
-                }
-                else
-                {
-                    signo = SIGSTAT;
-                }
-            }
-            else
-            {
-                WARN("failed to sigtimedwait()");
-            }
-        }
-        
-        if (signo >= 0)
-        {
-            /* SIGEXIT informs the manager thread to quit, and the actual
-             * signal to be propagated to sandbox instances is SIGKILL */
-            if (signo == SIGEXIT)
-            {
-                end = true;
-                signo = SIGKILL;
-            }
-            /* Propagate the received signal to all active sandbox instances */
-            P(&global_mutex);
-            sandbox_ref_t * item;
-            SLIST_FOREACH(item, pool, entries)
-            {
-                sandbox_notify(item->psbox, signo);
-            }
-            V(&global_mutex);
-        }
-        
-        /* delta is the measured time of the current profiling cycle */
-        if (clock_gettime(CLOCK_MONOTONIC, &delta) != 0)
-        {
-            WARN("failed to get current time");
-            delta = cycle;
-        }
-        else
-        {
-            ts_inplace_sub(delta, t);
-        }
-        
-        /* Calibrate the timeout for next profiling cycle.*/
-        if (siginfo.si_code == SI_TIMER)
-        {
-            DBUG("profiling cycle (%llu): timeout %.2lf / delta %.2lf / "
-                "error %.2lf", pf_count, 
-                0.000001 * timeout.tv_nsec + 1000. * timeout.tv_sec,  
-                0.000001 * delta.tv_nsec + 1000. * delta.tv_sec, 
-                0.000001 * (delta.tv_nsec - cycle.tv_nsec) + 
-                1000. * (delta.tv_sec - cycle.tv_sec));
-            /* Restore timeout to cycle */
-            if (ts_less(timeout, eps) || ts_less(cycle, timeout))
-            {
-                timeout = cycle;
-            }
-            /* Add the error of measured time to the timeout. */
-            if (ts_less(cycle, delta))
-            {
-                /* timeout = timeout - (delta - cycle) */
-                ts_inplace_sub(delta, cycle);
-                if (ts_less(delta, timeout))
-                {
-                    ts_inplace_sub(timeout, delta);
-                }
-                else
-                {
-                    timeout = cycle;
-                }
-            }
-            else
-            {
-                /* timeout = timeout + (cycle - delta) */
-                ts_inplace_add(timeout, cycle);
-                ts_inplace_sub(timeout, delta);
-            }
-        }
-        else
-        {
-            /* If the current profiling cycle was interrupted, we subtract the 
-             * measured time from the sleep timeout and resume sleeping */
-            if (ts_less(delta, timeout))
-            {
-                ts_inplace_sub(timeout, delta);
-            }
-            else
-            {
-                timeout = zero;
-            }
-        }
-    }
-    
-    FUNC_RET("%p", (void *)pool);
-}
-
-sandbox_pool_t sandbox_pool = SLIST_HEAD_INITIALIZER(sandbox_pool);
-
-pthread_mutex_t global_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 #ifdef __cplusplus
 } /* extern "C" */

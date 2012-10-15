@@ -2,7 +2,7 @@
 ################################################################################
 # The Sandbox Libraries (Python) Distutil Script                               #
 #                                                                              #
-# Copyright (C) 2004-2009, 2011, 2012 LIU Yu, pineapple.liu@gmail.com          #
+# Copyright (C) 2004-2009, 2011-2013 LIU Yu, pineapple.liu@gmail.com           #
 # All rights reserved.                                                         #
 #                                                                              #
 # Redistribution and use in source and binary forms, with or without           #
@@ -32,14 +32,10 @@
 # POSSIBILITY OF SUCH DAMAGE.                                                  #
 ################################################################################
 """The sandbox libraries (libsandbox & pysandbox) provide API's in C/C++ and Python
-for executing and profiling simple (single process) programs in a restricted 
-environment, or sandbox. These API's can help developers to build automated 
-profiling tools and watchdogs that capture and block the runtime behaviours of 
+for executing and profiling simple (single process) programs in a restricted
+environment, or sandbox. These API's can help developers to build automated
+profiling tools and watchdogs that capture and block the runtime behaviours of
 binary programs according to configurable / programmable policies."""
-
-from distutils.core import setup, Extension
-from glob import glob
-from os.path import join, basename
 
 NAME = 'pysandbox'
 VERSION = "0.3.5"
@@ -52,47 +48,86 @@ URL = "http://sourceforge.net/projects/libsandbox"
 LICENSE = "BSD License"
 DESCRIPTION = "The Sandbox Libraries (Python)"
 
+from distutils.core import setup, Extension
+from glob import glob
+from os.path import join
+
 try:
     # python 2.7+
     from subprocess import check_output
 except ImportError:
     # python 2.6
-    from commands import getoutput
-    check_output = lambda tup: getoutput(' '.join(tup))
+    def check_output(cmd):
+        from commands import getstatusoutput
+        from subprocess import CalledProcessError
+        retcode, output = getstatusoutput(' '.join(cmd))
+        if retcode:
+            raise CalledProcessError(retcode, ' '.join(cmd))
+        return output
+    pass
 
 try:
-    pkgconfig = ['pkg-config', '--silence-errors', 'libsandbox']
-    core_ccflags = check_output(pkgconfig + ['--cflags', ]).decode().split()
-    core_ldflags = check_output(pkgconfig + ['--libs', ]).decode().split()
+    pkgconfig = ['pkg-config', '--silence-errors', 'libsandbox', '--static', ]
+    CCFLAGS = check_output(pkgconfig + ['--cflags', ]).decode().split()
+    LDFLAGS = check_output(pkgconfig + ['--libs', ]).decode().split()
 except:
-    core_ccflags = ['-pthread', ]
-    core_ldflags = ['-lsandbox', '-lrt']
+    CCFLAGS = ['-pthread', ]
+    LDFLAGS = ['-lsandbox', '-lrt', '-lm', ]
+
+
+def patch_link_args(oldflags, static_core_lib=False):
+    newflags = []
+    for flag in oldflags:
+        if static_core_lib and flag == '-lsandbox':
+            newflags.append(flag.replace('-l', '-Wl,-Bstatic,-l'))
+        elif flag.startswith('-l'):
+            newflags.append(flag.replace('-l', '-Wl,-Bdynamic,-l'))
+        else:
+            newflags.append(flag)
+    return newflags
 
 _sandbox = Extension('_sandbox',
     language='c',
-    define_macros=[('SANDBOX', None), 
-                   ('NDEBUG', None), 
-                   ('AUTHOR', '"%s <%s>"' % \
-                   (AUTHOR, AUTHOR_EMAIL)), 
-                   ('VERSION', '"%s-%s"' % \
-                   (VERSION, RELEASE))],
-    undef_macros=['DEBUG'], 
-    extra_compile_args=['-Wall', '-g0', '-O3', '-Wno-write-strings'] + core_ccflags, 
-    extra_link_args=[] + core_ldflags, 
-    include_dirs=[join('packages', 'sandbox'), ], 
+    define_macros=[('SANDBOX', None),
+                   ('NDEBUG', None),
+                   ('AUTHOR', '"%s <%s>"' % (AUTHOR, AUTHOR_EMAIL)),
+                   ('VERSION', '"%s-%s"' % (VERSION, RELEASE))],
+    undef_macros=['DEBUG'],
+    extra_compile_args=['-Wall', '-g0', '-O3', '-Wno-write-strings'] + CCFLAGS,
+    extra_link_args=patch_link_args(LDFLAGS),
+    include_dirs=[join('packages', 'sandbox'), ],
     sources=glob(join('packages', 'sandbox', '*.c')))
 
-setup(name=NAME, 
-      version=VERSION, 
-      description=DESCRIPTION, 
-      long_description=__doc__, 
-      author=AUTHOR, 
-      author_email=AUTHOR_EMAIL, 
-      maintainer=MAINTAINER, 
-      maintainer_email=MAINTAINER_EMAIL, 
-      license=LICENSE, 
-      url=URL, 
-      package_dir = {'sandbox': join('packages', 'sandbox'), },
-      packages=['sandbox', ], 
+setup(name=NAME,
+      version=VERSION,
+      description=DESCRIPTION,
+      long_description=__doc__,
+      author=AUTHOR,
+      author_email=AUTHOR_EMAIL,
+      maintainer=MAINTAINER,
+      maintainer_email=MAINTAINER_EMAIL,
+      license=LICENSE,
+      url=URL,
+      package_dir={'sandbox': join('packages', 'sandbox'), },
+      packages=['sandbox', ],
       ext_package='sandbox',
-      ext_modules=[_sandbox, ])
+      ext_modules=[_sandbox, ],
+      classifiers=[
+          'Development Status :: 4 - Beta',
+          'License :: OSI Approved :: BSD License',
+          'Intended Audience :: Developers',
+          'Intended Audience :: Science/Research',
+          'Intended Audience :: Education',
+          'Operating System :: POSIX :: Linux',
+          'Programming Language :: C',
+          'Programming Language :: Python',
+          'Programming Language :: Python :: 2',
+          'Programming Language :: Python :: 2.6',
+          'Programming Language :: Python :: 2.7',
+          'Programming Language :: Python :: 3',
+          'Programming Language :: Python :: 3.2',
+          'Topic :: Software Development :: Libraries',
+          'Topic :: Software Development :: Quality Assurance',
+          'Topic :: Software Development :: Testing',
+          'Topic :: Security',
+          'Topic :: Education :: Testing', ])

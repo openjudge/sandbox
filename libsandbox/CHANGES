@@ -1,3 +1,27 @@
+[2013/03/23] LIU Yu, <pineapple.liu@gmail.com>
+  * in platform.c renamed sandbox_ref_t -> sandbox_mgr_t
+  * in platform.c fixed SIGPROF / SIGSTAT frequency mismatch
+  * in platform.c rewrote sleep timeout calibration in sandbox_manager()
+  * in platform.c added errno preservation to an early return of proc_probe()
+  * in sandbox.c moved mem profiling from sandbox_watcher() to sandbox_profiler()
+  * in sandbox.c removed an aggressive MONITOR_ERROR from sandbox_profiler()
+  * updated copyright year in source code headers
+  * in configure.in added -lm to linker arguments
+
+[2013/01/09] LIU Yu, <pineapple.liu@gmail.com>
+  * modified configure.in to generate pkgconfig and rpmbuild spec's from
+    template files sandbox.{pc,spec}.in and removed sandbox.{pc,spec}
+
+[2012/11/08] LIU Yu, <pineapple.liu@gmail.com>
+  * removed --enable-cachesz configure option as it has little effect on SMP 
+    systems; also removed cache_flush() from platform.{h,c} and sandbox.c
+  * in internal.h capitalized ts_{less,inplace_add,inplace_sub} macros
+  * moved sandbox_manager(), sandbox_pool and global_mutex from sandbox.c to 
+    platform.c; also localized them as static function / variables
+  * moved sandbox_ref_t and sandbox_pool_t from internal.h to platform.c
+  * in platform.c renamed init() -> global_init(), fini() -> global_fini(),
+    sandbox_pool -> global_pool
+
 [2012/10/13] LIU Yu, <pineapple.liu@gmail.com>
   * the global trace pool is now implicit rather than an optional feature.
   * in sandbox.c optimized sandbox_manager() to reduce memory footprint.

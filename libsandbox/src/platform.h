@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2004-2009, 2011, 2012 LIU Yu, pineapple.liu@gmail.com         *
+ * Copyright (C) 2004-2009, 2011-2013 LIU Yu, pineapple.liu@gmail.com          *
  * All rights reserved.                                                        *
  *                                                                             *
  * Redistribution and use in source and binary forms, with or without          *
@@ -452,13 +452,6 @@ bool trace_end(const proc_t * const pproc);
  * @return the same pointer as input
  */
 void * sandbox_tracer(void * const psbox);
-
-/**
- * @brief Evict the existing blocks from the data caches.
- * This function was taken from Chapter 9 of Computer Systems A Programmer's
- * Perspective by Randal E. Bryant and David R. O'Hallaron
- */
-void cache_flush(void);
 
 #ifdef __cplusplus
 } /* extern "C" */

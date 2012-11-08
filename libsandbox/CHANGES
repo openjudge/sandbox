@@ -1,3 +1,13 @@
+[2012/11/08] LIU Yu, <pineapple.liu@gmail.com>
+  * removed --enable-cachesz configure option as it has little effect on SMP 
+    systems; also removed cache_flush() from platform.{h,c} and sandbox.c
+  * in internal.h capitalized ts_{less,inplace_add,inplace_sub} macros
+  * moved sandbox_manager(), sandbox_pool and global_mutex from sandbox.c to 
+    platform.c; also localized them as static function / variables
+  * moved sandbox_ref_t and sandbox_pool_t from internal.h to platform.c
+  * in platform.c renamed init() -> global_init(), fini() -> global_fini(),
+    sandbox_pool -> global_pool
+
 [2012/10/13] LIU Yu, <pineapple.liu@gmail.com>
   * the global trace pool is now implicit rather than an optional feature.
   * in sandbox.c optimized sandbox_manager() to reduce memory footprint.

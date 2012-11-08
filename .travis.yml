@@ -11,16 +11,15 @@ before_install:
   - mkdir -p $SBOX_HOME/bin
   - mkdir -p $SBOX_HOME/include
   - mkdir -p $SBOX_HOME/lib
-
-install:
-  # dependencies
   - sudo apt-get install -qq python-dev
   - pip install pep8 --use-mirrors
-  - pep8 . --ignore E128,E501
+
+install:
   # core
   - cd ./libsandbox/ && ./configure --prefix=$SBOX_HOME --enable-chkvsc && cd ..
   - make -C ./libsandbox install
-  # pythonic wrapper
+  # python
+  - pep8 . --ignore E128,E501
   - cd ./pysandbox && env CFLAGS="-I$SBOX_HOME/include" LDFLAGS="-L$SBOX_HOME/lib -Wl,-rpath,$SBOX_HOME/lib" python setup.py install --home=$SBOX_HOME && cd ..
   # test cases
   - gcc -I$SBOX_HOME/include -o sample2.exe sample2.c -L$SBOX_HOME/lib -Wl,-rpath,$SBOX_HOME/lib -lsandbox

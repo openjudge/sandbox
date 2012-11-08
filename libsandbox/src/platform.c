@@ -50,10 +50,6 @@
 #include <sys/times.h>          /* struct tms, struct timeval */
 #include <unistd.h>             /* access(), lseek(), {R,F}_OK */
 
-#ifndef sigev_notify_thread_id
-#define sigev_notify_thread_id _sigev_un._tid
-#endif /* sigev_notify_thread_id */
-
 #ifdef HAVE_PTRACE
 #ifdef HAVE_SYS_PTRACE_H
 #include <sys/ptrace.h>         /* ptrace(), PTRACE_* */
@@ -548,6 +544,39 @@ proc_dump(const proc_t * const pproc, const void * const addr,
     FUNC_RET("%d", true);
 }
 
+#ifdef HAVE_PROCFS
+
+static bool
+check_procfs(pid_t pid)
+{
+    FUNC_BEGIN("%d", pid);
+    assert(pid > 0);
+    
+    /* Validate procfs */
+    struct statfs sb;
+    if ((statfs(PROCFS, &sb) < 0) || (sb.f_type != PROC_SUPER_MAGIC))
+    {
+        FUNC_RET("%d", false);
+    }
+    
+    /* Validate process entries in procfs */
+    char buffer[4096];
+    sprintf(buffer, PROCFS "/%d",pid);
+    if (access(buffer, R_OK | X_OK) < 0)
+    {
+        /* Patch errno to ESRCH (No such process) */
+        if (errno == ENOENT)
+        {
+            errno = ESRCH;
+        }
+        FUNC_RET("%d", false);
+    }
+    
+    FUNC_RET("%d", true);
+}
+
+#endif /* HAVE_PROCFS */
+
 bool
 trace_me(void)
 {
@@ -681,6 +710,19 @@ __trace_impl(option_t option, proc_t * const pproc, void * const addr,
 
 /* Global variables for the trace subsystem */
 
+typedef struct __pool_item
+{
+    sandbox_t * psbox;
+    SLIST_ENTRY(__pool_item) entries;
+} sandbox_ref_t;
+
+static SLIST_HEAD(__pool_struct, __pool_item) global_pool = \
+    SLIST_HEAD_INITIALIZER(global_pool);
+
+typedef struct __pool_struct sandbox_pool_t;
+
+static pthread_mutex_t global_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 typedef struct
 {
     option_t option;
@@ -780,7 +822,7 @@ sandbox_tracer(void * const dummy)
     P(&global_mutex);
     sandbox_ref_t * item = (sandbox_ref_t *)malloc(sizeof(sandbox_ref_t));
     item->psbox = psbox;
-    SLIST_INSERT_HEAD(&sandbox_pool, item, entries);
+    SLIST_INSERT_HEAD(&global_pool, item, entries);
     DBUG("registered sandbox %p to the pool", psbox);
     V(&global_mutex);
     
@@ -834,7 +876,7 @@ sandbox_tracer(void * const dummy)
     /* Remove sandbox from the pool */
     P(&global_mutex);
     assert(item);
-    SLIST_REMOVE(&sandbox_pool, item, __pool_item, entries);
+    SLIST_REMOVE(&global_pool, item, __pool_item, entries);
     free(item);
     DBUG("removed sandbox %p from the pool", psbox);
     V(&global_mutex);
@@ -842,71 +884,22 @@ sandbox_tracer(void * const dummy)
     FUNC_RET("%p", (void *)&psbox->result);
 }
 
-#ifndef CACHE_SIZE
-#define CACHE_SIZE (1 << 22)    /* assume 4MB cache */
-#endif /* CACHE_SIZE */
-
-static int cache[CACHE_SIZE / sizeof(int)];
-volatile int cache_sink;        /* variable used for clearing cache */
-
-void 
-cache_flush(void)
-{
-    PROC_BEGIN();
-    unsigned int i;
-    unsigned int sum = 0;
-    for (i = 0; i < CACHE_SIZE / sizeof(int); i++) cache[i] = 3;
-    for (i = 0; i < CACHE_SIZE / sizeof(int); i++) sum += cache[i];
-    cache_sink = sum;
-    PROC_END();
-}
-
-#ifdef HAVE_PROCFS
-
-static bool
-check_procfs(pid_t pid)
-{
-    FUNC_BEGIN("%d", pid);
-    assert(pid > 0);
-    
-    /* Validate procfs */
-    struct statfs sb;
-    if ((statfs(PROCFS, &sb) < 0) || (sb.f_type != PROC_SUPER_MAGIC))
-    {
-        FUNC_RET("%d", false);
-    }
-    
-    /* Validate process entries in procfs */
-    char buffer[4096];
-    sprintf(buffer, PROCFS "/%d",pid);
-    if (access(buffer, R_OK | X_OK) < 0)
-    {
-        /* Patch errno to ESRCH (No such process) */
-        if (errno == ENOENT)
-        {
-            errno = ESRCH;
-        }
-        FUNC_RET("%d", false);
-    }
-    
-    FUNC_RET("%d", true);
-}
-
-#endif /* HAVE_PROCFS */
-
-void
+/**
+ * @brief Send signal to monitor threads of a \c sandbox_t object.
+ */
+static void
 sandbox_notify(sandbox_t * const psbox, int signo)
 {
     PROC_BEGIN("%p", psbox);
     assert(psbox && (signo > 0));
     
-    const pthread_t profiler = psbox->ctrl.monitor[0].tid;
+    const pthread_t profiler_thread = psbox->ctrl.monitor[0].tid;
     switch (signo)
     {
     case SIGEXIT:
     case SIGSTAT:
     case SIGPROF:
-        pthread_kill(profiler, signo);
+        pthread_kill(profiler_thread, signo);
         break;
     default:
         /* Wrap the real signal in the payload of SIGEXIT, because the
@@ -915,7 +908,7 @@ sandbox_notify(sandbox_t * const psbox, int signo)
         {
             union sigval sv;
             sv.sival_int = signo;
-            if (pthread_sigqueue(profiler, SIGEXIT, sv) != 0)
+            if (pthread_sigqueue(profiler_thread, SIGEXIT, sv) != 0)
             {
                 WARN("failed pthread_sigqueue()");
             }
@@ -926,35 +919,207 @@ sandbox_notify(sandbox_t * const psbox, int signo)
     PROC_END();
 }
 
-static sigset_t sigmask;
-static sigset_t oldmask;
-static pthread_t manager;
-
-static __attribute__((constructor)) void 
-init(void)
+/**
+ * @brief Service thread for coordinating active \c sandbox_t objects.
+ */
+static void *
+sandbox_manager(sandbox_pool_t * const pool)
 {
-    PROC_BEGIN();
+    FUNC_BEGIN("%p", pool);
+    assert(pool);
     
-    /* Block signals relevant to libsandbox control, they will be unblocked 
-     * and handled by the the manager thread (pool mode) or by the profiler 
-     * threads of individual sandboxes (non-pool mode). */
-    
+    sigset_t sigmask;
     sigemptyset(&sigmask);
     sigaddset(&sigmask, SIGEXIT);
-    sigaddset(&sigmask, SIGSTAT);
-    sigaddset(&sigmask, SIGPROF);
     sigaddset(&sigmask, SIGTERM);
     sigaddset(&sigmask, SIGQUIT);
     sigaddset(&sigmask, SIGINT);
     
-    if (pthread_sigmask(SIG_BLOCK, &sigmask, &oldmask) != 0)
+    struct timespec cycle = (struct timespec){0, ms2ns(1000 / PROF_FREQ)};
+    struct timespec zero = (struct timespec){0, 0};
+    struct timespec eps;
+    
+    if (clock_getres(CLOCK_MONOTONIC, &eps) != 0)
+    {
+        WARN("failed to get clock resolution");
+        eps = (struct timespec){0, ms2ns(1)};
+    }
+    
+    /* Relax profiling frequencies that are too high to realize */
+    if (TS_LESS(cycle, eps))
+    {
+        cycle = eps;
+    }
+    
+    DBUG("profiling frequency is at %.2fHz", 1000. / ts2ms(cycle));
+    
+    /* The primary task of the manager thread is to send peroidical SIGPROF and
+     * SIGSTAT signals to all active sandbox instances. We used to raise these
+     * signals with recurring timers created by timer_create(), and propagate
+     * the signals to all active sandbox instances. However, memory profiling
+     * with Massif (http://valgrind.org/docs/manual/ms-manual.html) showed that 
+     * timer_create() may cause heap contention in multithreaded scenarios. And 
+     * it leads to the creation of new arena consuming 100MB+ memory in its own.
+     * Therefore, since 0.3.5-2, we started to use clock_nanosleep() to emulate
+     * recurring timers. The problem is to calibrate the sleep timeout, such
+     * that the time of profiling cycle converges to (1 / PROF_FREQ) second(s).
+     * That said, the manager thread is best viewed as a closed-loop control 
+     * system, where the sleep timeout is the input, the measured time is the
+     * the output, and the error of the measured time is the feedback. */
+    
+    unsigned long long pf_count = 0;
+    struct timespec timeout = zero;
+    struct timespec delta, t;
+    bool end = false;
+    
+    while (!end)
+    {
+        if (clock_gettime(CLOCK_MONOTONIC, &t) != 0)
+        {
+            WARN("failed to get current time");
+            continue;
+        }
+        
+        if ((errno = clock_nanosleep(CLOCK_MONOTONIC, 0, &timeout, NULL)) > 0)
+        {
+            WARN("failed in clock_nanosleep()");
+        }
+        
+        siginfo_t siginfo;
+        int signo;
+        if ((signo = sigtimedwait(&sigmask, &siginfo, &zero)) < 0)
+        {
+            if (errno == EAGAIN)
+            {
+                siginfo.si_code = SI_TIMER;
+                if ((pf_count++) % (PROF_FREQ / STAT_FREQ) == 0)
+                {
+                    signo = SIGPROF;
+                }
+                else
+                {
+                    signo = SIGSTAT;
+                }
+            }
+            else
+            {
+                WARN("failed to sigtimedwait()");
+            }
+        }
+        
+        if (signo >= 0)
+        {
+            /* SIGEXIT informs the manager thread to quit, and the actual
+             * signal to be propagated to sandbox instances is SIGKILL */
+            if (signo == SIGEXIT)
+            {
+                end = true;
+                signo = SIGKILL;
+            }
+            /* Propagate the received signal to all active sandbox instances */
+            P(&global_mutex);
+            sandbox_ref_t * item;
+            SLIST_FOREACH(item, pool, entries)
+            {
+                sandbox_notify(item->psbox, signo);
+            }
+            V(&global_mutex);
+        }
+        
+        /* delta is the measured time of the current profiling cycle */
+        if (clock_gettime(CLOCK_MONOTONIC, &delta) != 0)
+        {
+            WARN("failed to get current time");
+            delta = cycle;
+        }
+        else
+        {
+            TS_INPLACE_SUB(delta, t);
+        }
+        
+        /* Calibrate the timeout for next profiling cycle.*/
+        if (siginfo.si_code == SI_TIMER)
+        {
+            /*
+            DBUG("profiling cycle (%llu): timeout %.2lf / delta %.2lf / "
+                "error %.2lf", pf_count, 
+                0.000001 * timeout.tv_nsec + 1000. * timeout.tv_sec,  
+                0.000001 * delta.tv_nsec + 1000. * delta.tv_sec, 
+                0.000001 * (delta.tv_nsec - cycle.tv_nsec) + 
+                1000. * (delta.tv_sec - cycle.tv_sec));
+            */
+            /* Restore timeout to cycle */
+            if (TS_LESS(timeout, eps) || TS_LESS(cycle, timeout))
+            {
+                timeout = cycle;
+            }
+            /* Add the error of measured time to the timeout. */
+            if (TS_LESS(cycle, delta))
+            {
+                /* timeout = timeout - (delta - cycle) */
+                TS_INPLACE_SUB(delta, cycle);
+                if (TS_LESS(delta, timeout))
+                {
+                    TS_INPLACE_SUB(timeout, delta);
+                }
+                else
+                {
+                    timeout = cycle;
+                }
+            }
+            else
+            {
+                /* timeout = timeout + (cycle - delta) */
+                TS_INPLACE_ADD(timeout, cycle);
+                TS_INPLACE_SUB(timeout, delta);
+            }
+        }
+        else
+        {
+            /* If the current profiling cycle was interrupted, we subtract the 
+             * measured time from the sleep timeout and resume sleeping */
+            if (TS_LESS(delta, timeout))
+            {
+                TS_INPLACE_SUB(timeout, delta);
+            }
+            else
+            {
+                timeout = zero;
+            }
+        }
+    }
+    
+    FUNC_RET("%p", (void *)pool);
+}
+
+static sigset_t global_oldmask;
+static sigset_t global_newmask;
+static pthread_t manager_thread;
+
+static __attribute__((constructor)) void 
+global_init(void)
+{
+    PROC_BEGIN();
+    
+    /* Block signals relevant to libsandbox control, they will be unblocked 
+     * and handled by the the manager thread */
+    
+    sigemptyset(&global_newmask);
+    sigaddset(&global_newmask, SIGEXIT);
+    sigaddset(&global_newmask, SIGSTAT);
+    sigaddset(&global_newmask, SIGPROF);
+    sigaddset(&global_newmask, SIGTERM);
+    sigaddset(&global_newmask, SIGQUIT);
+    sigaddset(&global_newmask, SIGINT);
+    
+    if (pthread_sigmask(SIG_BLOCK, &global_newmask, &global_oldmask) != 0)
     {
         WARN("pthread_sigmask");
     }
     DBUG("blocked reserved signals");
     
-    if (pthread_create(&manager, NULL, (thread_func_t)sandbox_manager, 
-        (void *)&sandbox_pool) != 0)
+    if (pthread_create(&manager_thread, NULL, (thread_func_t)sandbox_manager, 
+        (void *)&global_pool) != 0)
     {
         WARN("failed to create the manager thread at %p", sandbox_manager);
     }
@@ -964,15 +1129,15 @@ init(void)
 }
 
 static __attribute__((destructor)) void
-fini(void)
+global_fini(void)
 {
     PROC_BEGIN();
     
-    pthread_kill(manager, SIGEXIT);
-    if (pthread_join(manager, NULL) != 0)
+    pthread_kill(manager_thread, SIGEXIT);
+    if (pthread_join(manager_thread, NULL) != 0)
     {
         WARN("failed to join the manager thread");
-        if (pthread_cancel(manager) != 0)
+        if (pthread_cancel(manager_thread) != 0)
         {
             WARN("failed to cancel the manager thread");
         }
@@ -981,15 +1146,15 @@ fini(void)
     
     /* Release references to active sandboxes */
     P(&global_mutex);
-    while (!SLIST_EMPTY(&sandbox_pool))
+    while (!SLIST_EMPTY(&global_pool))
     {
-        sandbox_ref_t * const item = SLIST_FIRST(&sandbox_pool);
+        sandbox_ref_t * const item = SLIST_FIRST(&global_pool);
         int i;
         for (i = 0; i < (SBOX_MONITOR_MAX); i++)
         {
             pthread_kill(item->psbox->ctrl.monitor[i].tid, SIGEXIT);
         }
-        SLIST_REMOVE_HEAD(&sandbox_pool, entries);
+        SLIST_REMOVE_HEAD(&global_pool, entries);
         free(item);
     }
     V(&global_mutex);
@@ -1002,14 +1167,14 @@ fini(void)
     int signo;
     siginfo_t siginfo;
     struct timespec timeout = {0, ms2ns(20)};
-    while ((signo = sigtimedwait(&sigmask, &siginfo, &timeout)) > 0)
+    while ((signo = sigtimedwait(&global_newmask, &siginfo, &timeout)) > 0)
     {
         DBUG("flushing signal %d", signo);
     }
     DBUG("flushed all pending signals");
     
     /* Restore saved sigmask */
-    if (pthread_sigmask(SIG_SETMASK, &oldmask, NULL) != 0)
+    if (pthread_sigmask(SIG_SETMASK, &global_oldmask, NULL) != 0)
     {
         WARN("pthread_sigmask");
     }

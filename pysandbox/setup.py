@@ -2,7 +2,7 @@
 ################################################################################
 # The Sandbox Libraries (Python) Distutil Script                               #
 #                                                                              #
-# Copyright (C) 2004-2009, 2011, 2012 LIU Yu, pineapple.liu@gmail.com          #
+# Copyright (C) 2004-2009, 2011-2013 LIU Yu, pineapple.liu@gmail.com           #
 # All rights reserved.                                                         #
 #                                                                              #
 # Redistribution and use in source and binary forms, with or without           #
@@ -93,4 +93,23 @@ setup(name=NAME,
       package_dir={'sandbox': join('packages', 'sandbox'), },
       packages=['sandbox', ],
       ext_package='sandbox',
-      ext_modules=[_sandbox, ])
+      ext_modules=[_sandbox, ],
+      classifiers=[
+          'Development Status :: 4 - Beta',
+          'License :: OSI Approved :: BSD License',
+          'Intended Audience :: Developers',
+          'Intended Audience :: Science/Research',
+          'Intended Audience :: Education',
+          'Operating System :: POSIX :: Linux',
+          'Programming Language :: C',
+          'Programming Language :: Python',
+          'Programming Language :: Python :: 2',
+          'Programming Language :: Python :: 2.6',
+          'Programming Language :: Python :: 2.7',
+          'Programming Language :: Python :: 3',
+          'Programming Language :: Python :: 3.2',
+          'Topic :: Software Development :: Libraries',
+          'Topic :: Software Development :: Quality Assurance',
+          'Topic :: Software Development :: Testing',
+          'Topic :: Security',
+          'Topic :: Education :: Testing', ])

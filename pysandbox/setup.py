@@ -61,12 +61,24 @@ except ImportError:
     check_output = lambda tup: getoutput(' '.join(tup))
 
 try:
-    pkgconfig = ['pkg-config', '--silence-errors', 'libsandbox']
-    ccflags = check_output(pkgconfig + ['--cflags', ]).decode().split()
-    ldflags = check_output(pkgconfig + ['--libs', ]).decode().split()
+    pkgconfig = ['pkg-config', '--silence-errors', 'libsandbox', '--static', ]
+    CCFLAGS = check_output(pkgconfig + ['--cflags', ]).decode().split()
+    LDFLAGS = check_output(pkgconfig + ['--libs', ]).decode().split()
 except:
-    ccflags = ['-pthread', ]
-    ldflags = ['-lsandbox', '-lrt']
+    CCFLAGS = ['-pthread', ]
+    LDFLAGS = ['-lsandbox', '-lrt', ]
+
+
+def patch_link_args(oldflags):
+    newflags = []
+    for flag in oldflags:
+        if flag == '-lsandbox':
+            newflags.append(flag.replace('-l', '-Wl,-Bstatic,-l'))
+        elif flag.startswith('-l'):
+            newflags.append(flag.replace('-l', '-Wl,-Bdynamic,-l'))
+        else:
+            newflags.append(flag)
+    return newflags
 
 _sandbox = Extension('_sandbox',
     language='c',
@@ -75,8 +87,8 @@ _sandbox = Extension('_sandbox',
                    ('AUTHOR', '"%s <%s>"' % (AUTHOR, AUTHOR_EMAIL)),
                    ('VERSION', '"%s-%s"' % (VERSION, RELEASE))],
     undef_macros=['DEBUG'],
-    extra_compile_args=['-Wall', '-g0', '-O3', '-Wno-write-strings'] + ccflags,
-    extra_link_args=[] + ldflags,
+    extra_compile_args=['-Wall', '-g0', '-O3', '-Wno-write-strings'] + CCFLAGS,
+    extra_link_args=patch_link_args(LDFLAGS),
     include_dirs=[join('packages', 'sandbox'), ],
     sources=glob(join('packages', 'sandbox', '*.c')))
 

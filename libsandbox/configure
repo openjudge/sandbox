@@ -4335,13 +4335,17 @@ if test "$libdir" == '${exec_prefix}/lib'; then
 fi
 
 if test -e sandbox.spec.in; then
-    ac_config_files="$ac_config_files sandbox.spec"
+    if ! test -e sandbox.spec || test sandbox.spec.in -nt sandbox.spec; then
+        ac_config_files="$ac_config_files sandbox.spec"
 
+    fi
 fi
 
 if test -e sandbox.pc.in; then
-    ac_config_files="$ac_config_files sandbox.pc"
+    if ! test -e sandbox.pc || test sandbox.pc.in -nt sandbox.pc; then
+        ac_config_files="$ac_config_files sandbox.pc"
 
+    fi
 fi
 
 cat >confcache <<\_ACEOF
@@ -5610,6 +5614,12 @@ $as_echo "$as_me: $ac_file is unchanged" >&6;}
 
   esac
 
+
+  case $ac_file$ac_mode in
+    "sandbox.spec":F) touch -c -r sandbox.spec.in sandbox.spec ;;
+    "sandbox.pc":F) touch -c -r sandbox.pc.in sandbox.pc ;;
+
+  esac
 done # for ac_tag
 
 

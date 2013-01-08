@@ -935,24 +935,6 @@ sandbox_manager(sandbox_pool_t * const pool)
     sigaddset(&sigmask, SIGQUIT);
     sigaddset(&sigmask, SIGINT);
     
-    struct timespec cycle = (struct timespec){0, ms2ns(1000 / PROF_FREQ)};
-    struct timespec zero = (struct timespec){0, 0};
-    struct timespec eps;
-    
-    if (clock_getres(CLOCK_MONOTONIC, &eps) != 0)
-    {
-        WARN("failed to get clock resolution");
-        eps = (struct timespec){0, ms2ns(1)};
-    }
-    
-    /* Relax profiling frequencies that are too high to realize */
-    if (TS_LESS(cycle, eps))
-    {
-        cycle = eps;
-    }
-    
-    DBUG("profiling frequency is at %.2fHz", 1000. / ts2ms(cycle));
-    
     /* The primary task of the manager thread is to send peroidical SIGPROF and
      * SIGSTAT signals to all active sandbox instances. We used to raise these
      * signals with recurring timers created by timer_create(), and propagate
@@ -967,8 +949,25 @@ sandbox_manager(sandbox_pool_t * const pool)
      * system, where the sleep timeout is the input, the measured time is the
      * the output, and the error of the measured time is the feedback. */
     
-    unsigned long long pf_count = 0;
-    struct timespec timeout = zero;
+    const struct timespec ZERO = (const struct timespec){0, 0};
+    const struct timespec EPS = (const struct timespec){0, ms2ns(1)};
+    
+    if (clock_getres(CLOCK_MONOTONIC, (struct timespec *)&EPS) != 0)
+    {
+        WARN("failed to get clock resolution");
+    }
+    
+    /* Relax profiling frequencies that are too high to realize */
+    struct timespec cycle = (struct timespec){0, ms2ns(1000 / PROF_FREQ)};
+    if (TS_LESS(cycle, EPS))
+    {
+        cycle = EPS;
+    }
+    
+    DBUG("profiling frequency is at %.2fHz", 1000. / ts2ms(cycle));
+    
+    unsigned long long count = 0;
+    struct timespec timeout = ZERO;
     struct timespec delta, t;
     bool end = false;
     
@@ -987,12 +986,12 @@ sandbox_manager(sandbox_pool_t * const pool)
         
         siginfo_t siginfo;
         int signo;
-        if ((signo = sigtimedwait(&sigmask, &siginfo, &zero)) < 0)
+        if ((signo = sigtimedwait(&sigmask, &siginfo, &ZERO)) < 0)
         {
             if (errno == EAGAIN)
             {
                 siginfo.si_code = SI_TIMER;
-                if ((pf_count++) % (PROF_FREQ / STAT_FREQ) == 0)
+                if ((count++) % (PROF_FREQ / STAT_FREQ) == 0)
                 {
                     signo = SIGPROF;
                 }
@@ -1042,14 +1041,14 @@ sandbox_manager(sandbox_pool_t * const pool)
         {
             /*
             DBUG("profiling cycle (%llu): timeout %.2lf / delta %.2lf / "
-                "error %.2lf", pf_count, 
+                "error %.2lf", count, 
                 0.000001 * timeout.tv_nsec + 1000. * timeout.tv_sec,  
                 0.000001 * delta.tv_nsec + 1000. * delta.tv_sec, 
                 0.000001 * (delta.tv_nsec - cycle.tv_nsec) + 
                 1000. * (delta.tv_sec - cycle.tv_sec));
             */
             /* Restore timeout to cycle */
-            if (TS_LESS(timeout, eps) || TS_LESS(cycle, timeout))
+            if (TS_LESS(timeout, EPS) || TS_LESS(cycle, timeout))
             {
                 timeout = cycle;
             }
@@ -1084,7 +1083,7 @@ sandbox_manager(sandbox_pool_t * const pool)
             }
             else
             {
-                timeout = zero;
+                timeout = ZERO;
             }
         }
     }

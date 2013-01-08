@@ -1,3 +1,7 @@
+[2013/01/09] LIU Yu, <pineapple.liu@gmail.com>
+  * modified configure.in to generate pkgconfig and rpmbuild spec's from
+    template files sandbox.{pc,spec}.in and removed sandbox.{pc,spec}
+
 [2012/11/08] LIU Yu, <pineapple.liu@gmail.com>
   * removed --enable-cachesz configure option as it has little effect on SMP 
     systems; also removed cache_flush() from platform.{h,c} and sandbox.c

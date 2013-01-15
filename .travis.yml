@@ -16,18 +16,18 @@ before_install:
 
 install:
   # core
-  - cd ./libsandbox/ && ./configure --prefix=$SBOX_HOME --enable-chkvsc && cd ..
+  - cd ./libsandbox/ && ./configure --prefix=$SBOX_HOME --libdir=$SBOX_HOME/lib --enable-chkvsc && cd ..
   - make -C ./libsandbox install
   # python
-  - pep8 . --ignore E128,E501
+  - pep8 --ignore E128,E501 .
   - cd ./pysandbox && env CFLAGS="-I$SBOX_HOME/include" LDFLAGS="-L$SBOX_HOME/lib -Wl,-rpath,$SBOX_HOME/lib" python setup.py install --home=$SBOX_HOME && cd ..
-  # test cases
+  # tests
   - gcc -I$SBOX_HOME/include -o sample2.exe sample2.c -L$SBOX_HOME/lib -Wl,-rpath,$SBOX_HOME/lib -lsandbox
   - install -c -D sample2.exe $SBOX_HOME/bin/sample2.exe
   - install -c -D sample2.py $SBOX_HOME/bin/sample2.py
 
 script: 
-  - nosetests
+  - env PYTHONPATH="$PYTHONPATH:$SBOX_HOME/lib/python" python -m testsuite.__main__ -f -v
 
 notifications:
   email:

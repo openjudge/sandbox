@@ -57,8 +57,14 @@ try:
     from subprocess import check_output
 except ImportError:
     # python 2.6
-    from commands import getoutput
-    check_output = lambda tup: getoutput(' '.join(tup))
+    def check_output(cmd):
+        from commands import getstatusoutput
+        from subprocess import CalledProcessError
+        retcode, output = getstatusoutput(' '.join(cmd))
+        if retcode:
+            raise CalledProcessError(retcode, ' '.join(cmd))
+        return output
+    pass
 
 try:
     pkgconfig = ['pkg-config', '--silence-errors', 'libsandbox', '--static', ]

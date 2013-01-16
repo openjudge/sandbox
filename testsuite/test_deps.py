@@ -45,8 +45,8 @@ class TestPlatformToolChain(unittest.TestCase):
         self.assertTrue(system() in ('Linux', ))
         self.assertTrue(machine() in ('i686', 'x86_64', ))
         from sys import version_info
-        self.assertTrue(version_info.major == 2 and version_info.minor >= 6 or
-                        version_info.major >= 3)
+        self.assertTrue(version_info[0] == 2 and version_info[1] >= 6 or
+                        version_info[0] >= 3)
         pass
 
     def test_toolchain(self):
@@ -87,12 +87,12 @@ class TestPackageIntegrity(unittest.TestCase):
 
     def test_sandbox_alloc(self):
         import sandbox
-        echo = (b"/bin/echo", b"Hello", b"World", )
+        echo = ("/bin/echo", "Hello", "World", )
         s = sandbox.Sandbox(echo)
         self.assertTrue(hasattr(s, 'task'))
         self.assertEqual(s.task, echo)
         self.assertTrue(hasattr(s, 'jail'))
-        self.assertEqual(s.jail, b"/")
+        self.assertEqual(s.jail, "/")
         self.assertTrue(hasattr(s, 'status'))
         self.assertEqual(s.status, sandbox.S_STATUS_RDY)
         self.assertTrue(hasattr(s, 'result'))

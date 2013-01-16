@@ -27,7 +27,7 @@ install:
   - install -c -D sample2.py $SBOX_HOME/bin/sample2.py
 
 script: 
-  - env PYTHONPATH="$PYTHONPATH:$SBOX_HOME/lib/python" python -m testsuite.__main__ -f -v
+  - env PYTHONPATH="$PYTHONPATH:$SBOX_HOME/lib/python" python -m testsuite.__main__ -v
 
 notifications:
   email:

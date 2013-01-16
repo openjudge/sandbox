@@ -37,10 +37,6 @@ environment, or sandbox. These API's can help developers to build automated
 profiling tools and watchdogs that capture and block the runtime behaviours of
 binary programs according to configurable / programmable policies."""
 
-from distutils.core import setup, Extension
-from glob import glob
-from os.path import join, basename
-
 NAME = 'pysandbox'
 VERSION = "0.3.5"
 RELEASE = "2"
@@ -51,6 +47,10 @@ MAINTAINER_EMAIL = AUTHOR_EMAIL
 URL = "http://sourceforge.net/projects/libsandbox"
 LICENSE = "BSD License"
 DESCRIPTION = "The Sandbox Libraries (Python)"
+
+from distutils.core import setup, Extension
+from glob import glob
+from os.path import join
 
 try:
     # python 2.7+
@@ -75,10 +75,10 @@ except:
     LDFLAGS = ['-lsandbox', '-lrt', ]
 
 
-def patch_link_args(oldflags):
+def patch_link_args(oldflags, static_core_lib=True):
     newflags = []
     for flag in oldflags:
-        if flag == '-lsandbox':
+        if static_core_lib and flag == '-lsandbox':
             newflags.append(flag.replace('-l', '-Wl,-Bstatic,-l'))
         elif flag.startswith('-l'):
             newflags.append(flag.replace('-l', '-Wl,-Bdynamic,-l'))

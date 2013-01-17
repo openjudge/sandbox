@@ -33,30 +33,51 @@
 ################################################################################
 #
 
-__all__ = ['TestSandboxedIO', ]
+from __future__ import with_statement
+
+__all__ = ['TestInputOutput', ]
 
 import unittest
 
 
-class TestSandboxedIO(unittest.TestCase):
+class TestInputOutput(unittest.TestCase):
+
+    def test_piped_stdin(self):
+        import os
+        from sandbox import Sandbox
+        from subprocess import Popen
+        # /bin/echo "Hello World" | sbox /bin/cat
+        p_rd, p_wr = os.pipe()
+        p = Popen(["/bin/echo", "Hello", "World"], close_fds=True, stdout=p_wr)
+        os.fdopen(p_wr, 'wb').close()
+        s_rd, s_wr = os.pipe()
+        s = Sandbox("/bin/cat", stdin=p_rd, stdout=s_wr)
+        s.run()
+        self.assertEqual(s.status, Sandbox.S_STATUS_FIN)
+        self.assertEqual(s.result, Sandbox.S_RESULT_OK)
+        # close the write-end of the pipe before reading from the read-end
+        os.fdopen(s_wr, 'wb').close()
+        with os.fdopen(s_rd, 'rb') as f:
+            self.assertEqual(f.read(), b"Hello World\n")
+            f.close()
+        pass
 
     def test_piped_stdout(self):
         import os
-        import fcntl
-        import sandbox
-        # redirect the output of /bin/echo through OS-pipe
-        p_rd, p_wr = os.pipe()
-        f = os.fdopen(p_rd, 'rb')
-        # set the reading-end of the pipe to be non-blocking
-        fl = fcntl.fcntl(f.fileno(), fcntl.F_GETFL)
-        fcntl.fcntl(f.fileno(), fcntl.F_SETFL, fl | os.O_NONBLOCK)
-        # run /bin/echo within the sandbox
-        s = sandbox.Sandbox(["/bin/echo", "Hello", "World"], stdout=p_wr)
+        from sandbox import Sandbox
+        from subprocess import Popen, PIPE
+        # sbox /bin/echo "Hello World" | /bin/cat
+        s_rd, s_wr = os.pipe()
+        s = Sandbox(["/bin/echo", "Hello", "World"], stdout=s_wr)
+        p = Popen("/bin/cat", close_fds=True, stdin=s_rd, stdout=PIPE)
         s.run()
-        self.assertEqual(f.read(), b"Hello World\n")
-        f.close()
-        self.assertEqual(s.status, sandbox.S_STATUS_FIN)
-        self.assertEqual(s.result, sandbox.S_RESULT_OK)
+        self.assertEqual(s.status, Sandbox.S_STATUS_FIN)
+        self.assertEqual(s.result, Sandbox.S_RESULT_OK)
+        # close the write-end of the pipe before reading from the read-end
+        os.fdopen(s_wr, 'wb').close()
+        os.fdopen(s_rd, 'rb').close()
+        stdout, stderr = p.communicate()
+        self.assertEqual(stdout, b"Hello World\n")
         pass
 
     pass
@@ -64,7 +85,7 @@ class TestSandboxedIO(unittest.TestCase):
 
 def test_suite():
     return unittest.TestSuite([
-        unittest.TestLoader().loadTestsFromTestCase(TestSandboxedIO), ])
+        unittest.TestLoader().loadTestsFromTestCase(TestInputOutput), ])
 
 if __name__ == '__main__':
     unittest.main(defaultTest='test_suite')

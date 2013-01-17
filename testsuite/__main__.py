@@ -31,6 +31,8 @@
 # POSSIBILITY OF SUCH DAMAGE.                                                  #
 ################################################################################
 
+__all__ = []
+
 import unittest
 
 from . import test_suite

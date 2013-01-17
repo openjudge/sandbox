@@ -4335,14 +4335,14 @@ if test "$libdir" == '${exec_prefix}/lib'; then
 fi
 
 if test -e sandbox.spec.in; then
-    if ! test -e sandbox.spec || test sandbox.spec.in -nt sandbox.spec; then
+    if ! test -e sandbox.spec || ! test sandbox.spec -nt sandbox.spec.in; then
         ac_config_files="$ac_config_files sandbox.spec"
 
     fi
 fi
 
 if test -e sandbox.pc.in; then
-    if ! test -e sandbox.pc || test sandbox.pc.in -nt sandbox.pc; then
+    if ! test -e sandbox.pc || ! test sandbox.pc -nt sandbox.pc.in; then
         ac_config_files="$ac_config_files sandbox.pc"
 
     fi

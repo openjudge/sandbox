@@ -1,7 +1,7 @@
 ################################################################################
 # The Sandbox Libraries pkg-config File                                        #
 #                                                                              #
-# Copyright (C) 2004-2009, 2011, 2012 LIU Yu, pineapple.liu@gmail.com          #
+# Copyright (C) 2004-2009, 2011-2013 LIU Yu, pineapple.liu@gmail.com           #
 # All rights reserved.                                                         #
 #                                                                              #
 # Redistribution and use in source and binary forms, with or without           #
@@ -42,6 +42,6 @@ Version: @PACKAGE_VERSION@
 Description: @PACKAGE_BRIEF@
 Requires:
 Libs: -L${libdir} -l@PACKAGE_NAME@
-Libs.private: -lpthread -lrt
+Libs.private: @LIBS@
 Cflags: -pthread -I${includedir}
 

@@ -1,3 +1,13 @@
+[2013/03/23] LIU Yu, <pineapple.liu@gmail.com>
+  * in platform.c renamed sandbox_ref_t -> sandbox_mgr_t
+  * in platform.c fixed SIGPROF / SIGSTAT frequency mismatch
+  * in platform.c rewrote sleep timeout calibration in sandbox_manager()
+  * in platform.c added errno preservation to an early return of proc_probe()
+  * in sandbox.c moved mem profiling from sandbox_watcher() to sandbox_profiler()
+  * in sandbox.c removed an aggressive MONITOR_ERROR from sandbox_profiler()
+  * updated copyright year in source code headers
+  * in configure.in added -lm to linker arguments
+
 [2013/01/09] LIU Yu, <pineapple.liu@gmail.com>
   * modified configure.in to generate pkgconfig and rpmbuild spec's from
     template files sandbox.{pc,spec}.in and removed sandbox.{pc,spec}

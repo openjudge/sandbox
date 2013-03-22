@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2004-2009, 2011, 2012 LIU Yu, pineapple.liu@gmail.com         *
+ * Copyright (C) 2004-2009, 2011-2013 LIU Yu, pineapple.liu@gmail.com          *
  * All rights reserved.                                                        *
  *                                                                             *
  * Redistribution and use in source and binary forms, with or without          *
@@ -40,6 +40,7 @@
 
 #include <ctype.h>              /* toupper() */
 #include <fcntl.h>              /* open(), close(), O_RDONLY */
+#include <math.h>               /* modfl(), lrintl() */
 #include <pthread.h>            /* pthread_{create,join,...}() */
 #include <signal.h>             /* kill(), SIG* */
 #include <stdio.h>              /* read(), sscanf(), sprintf() */
@@ -154,11 +155,13 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
     }
     
     int len = read(fd, buffer, sizeof(buffer) - 1);
+    int errnum = errno;
     
     close(fd);
 
     if (len < 0)
     {
+        errno = errnum;
         WARN("failed to grab stat from procfs");
         FUNC_RET("%d", false);
     }
@@ -710,19 +713,6 @@ __trace_impl(option_t option, proc_t * const pproc, void * const addr,
 
 /* Global variables for the trace subsystem */
 
-typedef struct __pool_item
-{
-    sandbox_t * psbox;
-    SLIST_ENTRY(__pool_item) entries;
-} sandbox_ref_t;
-
-static SLIST_HEAD(__pool_struct, __pool_item) global_pool = \
-    SLIST_HEAD_INITIALIZER(global_pool);
-
-typedef struct __pool_struct sandbox_pool_t;
-
-static pthread_mutex_t global_mutex = PTHREAD_MUTEX_INITIALIZER;
-
 typedef struct
 {
     option_t option;
@@ -735,6 +725,19 @@ typedef struct
 
 static trace_info_t trace_info = {T_OPTION_NOP, NULL, NULL, 0, 0, 0};
 static pthread_cond_t trace_update = PTHREAD_COND_INITIALIZER;
+
+typedef struct __pool_item
+{
+    sandbox_t * psbox;
+    SLIST_ENTRY(__pool_item) entries;
+} sandbox_mgr_t;
+
+static SLIST_HEAD(__pool_struct, __pool_item) global_pool = \
+    SLIST_HEAD_INITIALIZER(global_pool);
+
+typedef struct __pool_struct sandbox_pool_t;
+
+static pthread_mutex_t global_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static long
 __trace(option_t option, proc_t * const pproc, void * const addr, 
@@ -820,7 +823,7 @@ sandbox_tracer(void * const dummy)
     
     /* Register sandbox to the pool */
     P(&global_mutex);
-    sandbox_ref_t * item = (sandbox_ref_t *)malloc(sizeof(sandbox_ref_t));
+    sandbox_mgr_t * item = (sandbox_mgr_t *)malloc(sizeof(sandbox_mgr_t));
     item->psbox = psbox;
     SLIST_INSERT_HEAD(&global_pool, item, entries);
     DBUG("registered sandbox %p to the pool", psbox);
@@ -890,7 +893,7 @@ sandbox_tracer(void * const dummy)
 static void
 sandbox_notify(sandbox_t * const psbox, int signo)
 {
-    PROC_BEGIN("%p", psbox);
+    PROC_BEGIN("%p,%d", psbox, signo);
     assert(psbox && (signo > 0));
     
     const pthread_t profiler_thread = psbox->ctrl.monitor[0].tid;
@@ -936,52 +939,80 @@ sandbox_manager(sandbox_pool_t * const pool)
     sigaddset(&sigmask, SIGINT);
     
     /* The primary task of the manager thread is to send peroidical SIGPROF and
-     * SIGSTAT signals to all active sandbox instances. We used to raise these
-     * signals with recurring timers created by timer_create(), and propagate
+     * SIGSTAT signals to all active sandbox instances. We used to trigger the
+     * signals with recurring timers created by timer_create(), and brodcast
      * the signals to all active sandbox instances. However, memory profiling
      * with Massif (http://valgrind.org/docs/manual/ms-manual.html) showed that 
      * timer_create() may cause heap contention in multithreaded scenarios. And 
      * it leads to the creation of new arena consuming 100MB+ memory in its own.
      * Therefore, since 0.3.5-2, we started to use clock_nanosleep() to emulate
-     * recurring timers. The problem is to calibrate the sleep timeout, such
-     * that the time of profiling cycle converges to (1 / PROF_FREQ) second(s).
-     * That said, the manager thread is best viewed as a closed-loop control 
-     * system, where the sleep timeout is the input, the measured time is the
-     * the output, and the error of the measured time is the feedback. */
+     * recurring timers. The problem is to calibrate the sleep time, such that
+     * the period of a profiling cycle converges to (1 / PROF_FREQ) sec. Sleep
+     * time calibration is implemented as a discrete PID-controller, where SP
+     * is the planned profiling cycle (cycle), PV is the measured profiling 
+     * cycle (delta), and MV is the calibrated time for sleep (timeout). */
     
-    const struct timespec ZERO = (const struct timespec){0, 0};
-    const struct timespec EPS = (const struct timespec){0, ms2ns(1)};
+    #define dbl_ts2ms(x) (0.000001 * (x).tv_nsec + 1000.0 * (x).tv_sec)
     
-    if (clock_getres(CLOCK_MONOTONIC, (struct timespec *)&EPS) != 0)
+    const struct timespec ZERO = {0, 0};
+    
+    struct timespec cycle = {0, ms2ns(1000 / PROF_FREQ)};
     {
-        WARN("failed to get clock resolution");
+        /* Relax broadcasting frequencies that are too high to realize */
+        struct timespec eps = {0, ms2ns(1)};
+        if (clock_getres(CLOCK_MONOTONIC, &eps) != 0)
+        {
+            WARN("failed to get clock resolution");
+        }
+        TS_INPLACE_ADD(eps, eps);
+        if (TS_LESS(cycle, eps))
+        {
+            cycle = eps;
+        }
     }
+    DBUG("manager broadcasting at %.2lfHz", 1000. / dbl_ts2ms(cycle));
     
-    /* Relax profiling frequencies that are too high to realize */
-    struct timespec cycle = (struct timespec){0, ms2ns(1000 / PROF_FREQ)};
-    if (TS_LESS(cycle, EPS))
-    {
-        cycle = EPS;
-    }
+    /* Parameters for sleep time calibration */
+    const double Kp = 0.75, Ki = 0.25, Kd = 0.0;
+    const struct timespec MV_MIN = {0, cycle.tv_nsec / 2};
+    const struct timespec MV_MAX = cycle;
     
-    DBUG("profiling frequency is at %.2fHz", 1000. / ts2ms(cycle));
+    DBUG("SP=%.2lf / Kp=%.2lf, Ki=%.2lf, Kd=%.2lf / MV=[%.2lf, %.2lf]", 
+        dbl_ts2ms(cycle), Kp, Ki, Kd, dbl_ts2ms(MV_MIN), dbl_ts2ms(MV_MAX));
     
-    unsigned long long count = 0;
-    struct timespec timeout = ZERO;
-    struct timespec delta, t;
+    struct timespec timeout = cycle;
+    struct timespec t = ZERO;
+    struct timespec prev_error = ZERO;
+    struct timespec error = ZERO;
+    struct timespec integral = ZERO;
+    
+    unsigned long count = 0;
     bool end = false;
     
     while (!end)
     {
-        if (clock_gettime(CLOCK_MONOTONIC, &t) != 0)
+        /* delta is the measured time of previous profiling cycle */
+        struct timespec delta = ZERO;
+        if (clock_gettime(CLOCK_MONOTONIC, &delta) != 0)
         {
             WARN("failed to get current time");
             continue;
         }
-        
-        if ((errno = clock_nanosleep(CLOCK_MONOTONIC, 0, &timeout, NULL)) > 0)
+        else if (TS_LESS(delta, t))
         {
-            WARN("failed in clock_nanosleep()");
+            WARN("invalid previous time");
+            continue;
+        }
+        else
+        {
+            TS_INPLACE_SUB(delta, t);
+            TS_INPLACE_ADD(t, delta);
+            if (!TS_LESS(delta, t))
+            {
+                delta = cycle;
+            }
+            TS_INPLACE_ADD(error, delta);
+            TS_INPLACE_ADD(integral, delta);
         }
         
         siginfo_t siginfo;
@@ -991,13 +1022,13 @@ sandbox_manager(sandbox_pool_t * const pool)
             if (errno == EAGAIN)
             {
                 siginfo.si_code = SI_TIMER;
-                if ((count++) % (PROF_FREQ / STAT_FREQ) == 0)
+                if (count % (PROF_FREQ / STAT_FREQ) == 0)
                 {
-                    signo = SIGPROF;
+                    signo = SIGSTAT;
                 }
                 else
                 {
-                    signo = SIGSTAT;
+                    signo = SIGPROF;
                 }
             }
             else
@@ -1017,7 +1048,7 @@ sandbox_manager(sandbox_pool_t * const pool)
             }
             /* Propagate the received signal to all active sandbox instances */
             P(&global_mutex);
-            sandbox_ref_t * item;
+            sandbox_mgr_t * item;
             SLIST_FOREACH(item, pool, entries)
             {
                 sandbox_notify(item->psbox, signo);
@@ -1025,58 +1056,50 @@ sandbox_manager(sandbox_pool_t * const pool)
             V(&global_mutex);
         }
         
-        /* delta is the measured time of the current profiling cycle */
-        if (clock_gettime(CLOCK_MONOTONIC, &delta) != 0)
-        {
-            WARN("failed to get current time");
-            delta = cycle;
-        }
-        else
-        {
-            TS_INPLACE_SUB(delta, t);
-        }
-        
-        /* Calibrate the timeout for next profiling cycle.*/
+        /* Calibrate sleep time for this profiling cycle.*/
         if (siginfo.si_code == SI_TIMER)
         {
-            /*
-            DBUG("profiling cycle (%llu): timeout %.2lf / delta %.2lf / "
-                "error %.2lf", count, 
-                0.000001 * timeout.tv_nsec + 1000. * timeout.tv_sec,  
-                0.000001 * delta.tv_nsec + 1000. * delta.tv_sec, 
-                0.000001 * (delta.tv_nsec - cycle.tv_nsec) + 
-                1000. * (delta.tv_sec - cycle.tv_sec));
-            */
-            /* Restore timeout to cycle */
-            if (TS_LESS(timeout, EPS) || TS_LESS(cycle, timeout))
+            ++count;
+            TS_INPLACE_SUB(error, cycle);
+            TS_INPLACE_SUB(integral, cycle);
+
+            struct timespec derivative = error;
+            TS_INPLACE_SUB(derivative, prev_error);
+            
+            struct timespec feedback = ZERO;
             {
-                timeout = cycle;
+                /* Convert msec feedback to struct timespec equivalent */
+                long double _fb_msec = Kp * dbl_ts2ms(error) + 
+                    Ki * dbl_ts2ms(integral) + Kd * dbl_ts2ms(derivative);
+                long double _fb_int = 0.0;
+                long double _fb_frac = modfl(_fb_msec / 1000.0, &_fb_int);
+                feedback = (struct timespec){lrintl(_fb_int), 
+                lrintl(ms2ns(_fb_frac * 1000.0))}; 
             }
-            /* Add the error of measured time to the timeout. */
-            if (TS_LESS(cycle, delta))
+            
+            timeout = cycle;
+            TS_INPLACE_SUB(timeout, feedback);
+            if (TS_LESS(timeout, MV_MIN))
             {
-                /* timeout = timeout - (delta - cycle) */
-                TS_INPLACE_SUB(delta, cycle);
-                if (TS_LESS(delta, timeout))
-                {
-                    TS_INPLACE_SUB(timeout, delta);
-                }
-                else
-                {
-                    timeout = cycle;
-                }
+                timeout = MV_MIN;
             }
-            else
+            if (TS_LESS(MV_MAX, timeout))
             {
-                /* timeout = timeout + (cycle - delta) */
-                TS_INPLACE_ADD(timeout, cycle);
-                TS_INPLACE_SUB(timeout, delta);
+                timeout = MV_MAX;
             }
+            
+            DBUG("manager beacon (%06lu): PV=%.2lf / P=%.2lf, I=%.2lf, D=%.2lf"
+                " / MV=%.2lf", count, dbl_ts2ms(delta), dbl_ts2ms(error), 
+                dbl_ts2ms(integral), dbl_ts2ms(derivative), dbl_ts2ms(timeout));
+            
+            prev_error = error;
+            error = ZERO;
+            derivative = ZERO;
         }
         else
         {
             /* If the current profiling cycle was interrupted, we subtract the 
-             * measured time from the sleep timeout and resume sleeping */
+             * measured time from timeout and resume sleeping */
             if (TS_LESS(delta, timeout))
             {
                 TS_INPLACE_SUB(timeout, delta);
@@ -1085,6 +1108,12 @@ sandbox_manager(sandbox_pool_t * const pool)
             {
                 timeout = ZERO;
             }
+        }
+        
+        /* Sleep for a while according to calibrated time */
+        if ((errno = clock_nanosleep(CLOCK_MONOTONIC, 0, &timeout, NULL)) > 0)
+        {
+            WARN("failed in clock_nanosleep()");
         }
     }
     
@@ -1147,7 +1176,7 @@ global_fini(void)
     P(&global_mutex);
     while (!SLIST_EMPTY(&global_pool))
     {
-        sandbox_ref_t * const item = SLIST_FIRST(&global_pool);
+        sandbox_mgr_t * const item = SLIST_FIRST(&global_pool);
         int i;
         for (i = 0; i < (SBOX_MONITOR_MAX); i++)
         {

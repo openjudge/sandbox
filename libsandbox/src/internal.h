@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2004-2009, 2011, 2012 LIU Yu, pineapple.liu@gmail.com         *
+ * Copyright (C) 2004-2009, 2011-2013 LIU Yu, pineapple.liu@gmail.com          *
  * All rights reserved.                                                        *
  *                                                                             *
  * Redistribution and use in source and binary forms, with or without          *
@@ -265,7 +265,7 @@ extern "C"
 #define SIGEXIT          (SIGUSR1)
 #define SIGSTAT          (SIGUSR2)
 
-#define PROF_FREQ        (200)
+#define PROF_FREQ        (100)
 #define STAT_FREQ        (5)
 
 /* Macros for testing sandbox status */

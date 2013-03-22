@@ -72,7 +72,7 @@ try:
     LDFLAGS = check_output(pkgconfig + ['--libs', ]).decode().split()
 except:
     CCFLAGS = ['-pthread', ]
-    LDFLAGS = ['-lsandbox', '-lrt', ]
+    LDFLAGS = ['-lsandbox', '-lrt', '-lm', ]
 
 
 def patch_link_args(oldflags, static_core_lib=True):

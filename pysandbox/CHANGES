@@ -1,3 +1,6 @@
+[2013/03/24] LIU Yu, <pineapple.liu@gmail.com>
+  * in setup.py added -lm to linker arguments
+
 [2013/01/03] LIU Yu, <pineapple.liu@gmail.com>
   * in setup.{py,cfg} changed to static linkage against the core library
 

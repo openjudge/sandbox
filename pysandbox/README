@@ -29,10 +29,12 @@ INSTALLATION
   
   binary packages (CentOS/RedHat)
   
+  $ yum install --nogpgcheck libsandbox-<version>.<platform>.rpm
   $ yum install --nogpgcheck pysandbox-<version>.<platform>.rpm
   
   binary packages (Ubuntu)
   
+  $ dpkg -i libsandbox_<version>_<platform>.deb
   $ dpkg -i pysandbox_<version>_<platform>.deb
   
   source packages

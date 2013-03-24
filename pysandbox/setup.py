@@ -75,7 +75,7 @@ except:
     LDFLAGS = ['-lsandbox', '-lrt', '-lm', ]
 
 
-def patch_link_args(oldflags, static_core_lib=True):
+def patch_link_args(oldflags, static_core_lib=False):
     newflags = []
     for flag in oldflags:
         if static_core_lib and flag == '-lsandbox':

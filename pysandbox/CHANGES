@@ -2,7 +2,7 @@
   * in setup.py added -lm to linker arguments
 
 [2013/01/03] LIU Yu, <pineapple.liu@gmail.com>
-  * in setup.{py,cfg} changed to static linkage against the core library
+  * in setup.{py,cfg} enabled static linkage against the core library
 
 [2012/10/15] LIU Yu, <pineapple.liu@gmail.com>
   * in sandbox/module.c fixed clear order of objects

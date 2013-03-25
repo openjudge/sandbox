@@ -1,7 +1,7 @@
 ################################################################################
 # The Sandbox Libraries Makefile                                               #
 #                                                                              #
-# Copyright (C) 2004-2009, 2011, 2012 LIU Yu, pineapple.liu@gmail.com          #
+# Copyright (C) 2004-2009, 2011-2013 LIU Yu, pineapple.liu@gmail.com           #
 # All rights reserved.                                                         #
 #                                                                              #
 # Redistribution and use in source and binary forms, with or without           #
@@ -85,6 +85,8 @@ $(prefix) dist:
 clean:
 	rm -f src/internal.c src/config.h config.log config.status Makefile Doxyfile
 	rm -f $($(LIBRARY)_obj) $($(LIBRARY)_bdist)
+	if test -e $(LIBRARY).pc.in && ! test $(LIBRARY).pc -nt $(LIBRARY).pc.in; then rm -f $(LIBRARY).pc; fi
+	if test -e $(LIBRARY).spec.in && ! test $(LIBRARY).spec -nt $(LIBRARY).spec.in; then rm -f $(LIBRARY).spec; fi
 
 sdist: dist $($(LIBRARY)_sdist)
 	$(TAR) --dereference -czf dist/lib$(LIBRARY)-$(VERSION).tar.gz $($(LIBRARY)_sdist)

@@ -133,14 +133,15 @@ static void policy(const policy_t*, const event_t*, action_t*);
 static action_t* _KILL_RF(const sandbox_t*, const event_t*, action_t*);
 static action_t* _CONT(const sandbox_t*, const event_t*, action_t*);
 
-/* white list of essential linux syscalls */
+/* white list of essential linux syscalls for statically-linked C programs */
 const int sc_safe[] =
 {
 #ifdef __x86_64__
-    0, 1, 5, 8, 9, 10, 11, 12, 16, 25, 63, 158, 231, -1,
+    0, 1, 5, 8, 9, 10, 11, 12, 16, 25, 63, 158, 219, 231, 
 #else /* __i386__ */
-    3, 4, 19, 45, 54, 90, 91, 122, 125, 140, 163, 192, 197, 224, 243, 252, -1,
+    0, 3, 4, 19, 45, 54, 90, 91, 122, 125, 140, 163, 192, 197, 224, 243, 252, 
 #endif /* __x86_64__ */
+   -1, /* sentinel */
 };
 
 void

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2004-2009, 2011, 2012 LIU Yu, pineapple.liu@gmail.com         *
+ * Copyright (C) 2004-2009, 2011-2013 LIU Yu, pineapple.liu@gmail.com          *
  * All rights reserved.                                                        *
  *                                                                             *
  * Redistribution and use in source and binary forms, with or without          *
@@ -42,7 +42,6 @@
 #include <pthread.h>            /* pthread_mutex_{lock,unlock}() */
 #include <signal.h>             /* kill(), SIG* */
 #include <stdio.h>              /* fprintf(), fflush(), stderr */
-#include <sys/queue.h>          /* SLIST_*() */
 #include <time.h>               /* struct timespec */
 
 #ifdef __cplusplus
@@ -266,38 +265,8 @@ extern "C"
 #define SIGEXIT          (SIGUSR1)
 #define SIGSTAT          (SIGUSR2)
 
-#define PROF_FREQ        (200)
+#define PROF_FREQ        (100)
 #define STAT_FREQ        (5)
-
-struct __pool_item
-{
-    sandbox_t * psbox;
-    SLIST_ENTRY(__pool_item) entries;
-};
-
-extern SLIST_HEAD(__pool_struct, __pool_item) sandbox_pool;
-
-extern pthread_mutex_t global_mutex;
-
-/**
- * @brief Reference to a \c sandbox_t object.
- */
-typedef struct __pool_item sandbox_ref_t;
-
-/**
- * @brief Pool of active \c sandbox_t objects.
- */
-typedef struct __pool_struct sandbox_pool_t;
-
-/**
- * @brief Send signal to monitor threads of a \c sandbox_t object.
- */
-void sandbox_notify(sandbox_t * const psbox, int signo);
-
-/**
- * @brief Service thread for coordinating active \c sandbox_t objects.
- */
-void * sandbox_manager(sandbox_pool_t * const pool);
 
 /* Macros for testing sandbox status */
 #ifndef NOT_STARTED
@@ -355,23 +324,40 @@ void * sandbox_manager(sandbox_pool_t * const pool);
 /* Macros for manipulating struct timespec from <time.h> */
 #define ms2ns(x) (1000000 * (x))
 #define ts2ms(x) ((((x).tv_sec) * 1000) + (((x).tv_nsec) / 1000000))
-#define TS_SUBTRACT(x,y) \
+
+#define TS_LESS(x,y) \
+    RVAL_IF((x).tv_sec < (y).tv_sec) \
+        true \
+    RVAL_ELSE \
+        RVAL_IF(((x).tv_sec == (y).tv_sec) && ((x).tv_nsec < (y).tv_nsec)) \
+            true \
+        RVAL_ELSE \
+            false \
+        RVAL_FI \
+    RVAL_FI \
+/* TS_LESS */
+
+#define TS_INPLACE_ADD(x,y) \
 {{{ \
-    if ((x).tv_nsec < (y).tv_nsec) \
+    (x).tv_sec += (y).tv_sec; \
+    (x).tv_nsec += (y).tv_nsec; \
+    while ((x).tv_nsec >= ms2ns(1000)) \
     { \
-        long sec = 1 + ((y).tv_nsec - (x).tv_nsec) / ms2ns(1000); \
-        (x).tv_sec -= sec; \
-        (x).tv_nsec += ms2ns(1000 * sec); \
+        ++(x).tv_sec; \
+        (x).tv_nsec -= ms2ns(1000); \
     } \
-    if ((x).tv_nsec - (y).tv_nsec >= ms2ns(1000)) \
-    { \
-        long sec = ((y).tv_nsec - (x).tv_nsec) / ms2ns(1000); \
-        (x).tv_nsec -= ms2ns(1000 * sec); \
-        (x).tv_sec += sec; \
-    } \
+}}} /* TS_INPLACE_ADD */
+
+#define TS_INPLACE_SUB(x,y) \
+{{{ \
     (x).tv_sec -= (y).tv_sec; \
     (x).tv_nsec -= (y).tv_nsec; \
-}}} /* TS_SUBTRACT */
+    while ((x).tv_nsec < 0) \
+    { \
+        --(x).tv_sec; \
+        (x).tv_nsec += ms2ns(1000); \
+    } \
+}}} /* TS_INPLACE_SUB */
 
 /**
  * @brief Let the current process enter traced state.

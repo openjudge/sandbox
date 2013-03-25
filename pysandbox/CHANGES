@@ -1,3 +1,13 @@
+[2013/03/24] LIU Yu, <pineapple.liu@gmail.com>
+  * in setup.py added -lm to linker arguments
+
+[2013/01/03] LIU Yu, <pineapple.liu@gmail.com>
+  * in setup.{py,cfg} enabled static linkage against the core library
+
+[2012/10/15] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.c fixed clear order of objects
+  * in setup.{py,cfg} updated version to 0.3.5-2
+
 [2012/09/04] LIU Yu, <pineapple.liu@gmail.com>
   * in sandbox/module.c fixed early unlock in Sandbox_traverse()
 
@@ -9,6 +19,7 @@
   * in sandbox/module.c applied new LOCK/UNLOCK macros for concurrency control
   * in sandbox/module.c changed status and result attributes of Sandbox from
     instance members to getter methods
+  * in setup.{py,cfg} updated version to 0.3.5-1
 
 [2012/07/19] LIU Yu, <pineapple.liu@gmail.com>
   * in sandbox/module.c added new attributes owner and group to Sandbox

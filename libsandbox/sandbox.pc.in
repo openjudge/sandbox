@@ -1,7 +1,7 @@
 ################################################################################
 # The Sandbox Libraries pkg-config File                                        #
 #                                                                              #
-# Copyright (C) 2004-2009, 2011, 2012 LIU Yu, pineapple.liu@gmail.com          #
+# Copyright (C) 2004-2009, 2011-2013 LIU Yu, pineapple.liu@gmail.com           #
 # All rights reserved.                                                         #
 #                                                                              #
 # Redistribution and use in source and binary forms, with or without           #
@@ -31,17 +31,17 @@
 # POSSIBILITY OF SUCH DAMAGE.                                                  #
 ################################################################################
 
-prefix=/usr
-exec_prefix=${prefix}
-libdir=${exec_prefix}/lib64
-includedir=${prefix}/include
+prefix=@prefix@
+exec_prefix=@exec_prefix@
+libdir=@libdir@
+includedir=@includedir@
 modules=1
 
-Name: libsandbox
-Version: 0.3.5
-Description: The Sandbox Libraries
+Name: lib@PACKAGE_NAME@
+Version: @PACKAGE_VERSION@
+Description: @PACKAGE_BRIEF@
 Requires:
-Libs: -L${libdir} -lsandbox
-Libs.private: -lpthread -lrt
+Libs: -L${libdir} -l@PACKAGE_NAME@
+Libs.private: @LIBS@
 Cflags: -pthread -I${includedir}
 

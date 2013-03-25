@@ -1,0 +1,35 @@
+language: python
+python:
+  - "2.6"
+  - "2.7"
+  - "3.2"
+
+env:
+  - SBOX_HOME=~/.sbox PATH="$PATH:$SBOX_HOME/bin" PYTHONPATH="$PYTHONPATH:$SBOX_HOME/lib/python"
+
+before_install:
+  - mkdir -p $SBOX_HOME/bin
+  - mkdir -p $SBOX_HOME/include
+  - mkdir -p $SBOX_HOME/lib
+  - sudo apt-get install -qq python-dev
+  - pip install pep8 --use-mirrors
+
+install:
+  # core
+  - cd ./libsandbox/ && ./configure --prefix=$SBOX_HOME --libdir=$SBOX_HOME/lib --enable-chkvsc && cd ..
+  - make -C ./libsandbox install
+  # python
+  - pep8 --ignore E128,E501 .
+  - cd ./pysandbox && env CFLAGS="-I$SBOX_HOME/include" LDFLAGS="-L$SBOX_HOME/lib -Wl,-rpath,$SBOX_HOME/lib" python setup.py install --home=$SBOX_HOME && cd ..
+  # tests
+  - gcc -I$SBOX_HOME/include -o sample2.exe sample2.c -L$SBOX_HOME/lib -Wl,-rpath,$SBOX_HOME/lib -lsandbox
+  - install -c -D sample2.exe $SBOX_HOME/bin/sample2.exe
+  - install -c -D sample2.py $SBOX_HOME/bin/sample2.py
+
+script: 
+  - nosetests
+
+notifications:
+  email:
+    - pineapple.liu@gmail.com
+

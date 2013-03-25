@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2004-2009, 2011, 2012 LIU Yu, pineapple.liu@gmail.com         *
+ * Copyright (C) 2004-2009, 2011-2013 LIU Yu, pineapple.liu@gmail.com          *
  * All rights reserved.                                                        *
  *                                                                             *
  * Redistribution and use in source and binary forms, with or without          *
@@ -846,13 +846,13 @@ Sandbox_clear(Sandbox * self)
     FUNC_BEGIN("%p", self);
     assert(self);
     
-    Py_CLEAR(Sandbox_GET_IO(self).i);
-    Py_CLEAR(Sandbox_GET_IO(self).o);
-    Py_CLEAR(Sandbox_GET_IO(self).e);
-    
     LOCK(&Sandbox_GET_SBOX(self), EX);
     Sandbox_CLEAR_POLICY(self);
     UNLOCK(&Sandbox_GET_SBOX(self));
+    
+    Py_CLEAR(Sandbox_GET_IO(self).i);
+    Py_CLEAR(Sandbox_GET_IO(self).o);
+    Py_CLEAR(Sandbox_GET_IO(self).e);
     
     FUNC_RET("%d", 0);
 }

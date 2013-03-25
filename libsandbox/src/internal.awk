@@ -1,7 +1,7 @@
 ################################################################################
 # Sandbox Library Source File (internal.c) Generator Script                    #
 #                                                                              #
-# Copyright (C) 2004-2009, 2011, 2012 LIU Yu, pineapple.liu@gmail.com          #
+# Copyright (C) 2004-2009, 2011-2013 LIU Yu, pineapple.liu@gmail.com           #
 # All rights reserved.                                                         #
 #                                                                              #
 # Redistribution and use in source and binary forms, with or without           #
@@ -33,7 +33,7 @@
 
 BEGIN {
     print "/*******************************************************************************"
-    print " * Copyright (C) 2004-2009, 2011, 2012 LIU Yu, pineapple.liu@gmail.com         *"
+    print " * Copyright (C) 2004-2009, 2011-2013 LIU Yu, pineapple.liu@gmail.com          *"
     print " * All rights reserved.                                                        *"
     print " *                                                                             *"
     print " * Redistribution and use in source and binary forms, with or without          *"

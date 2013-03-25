@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2004-2009, 2011, 2012 LIU Yu, pineapple.liu@gmail.com         *
+ * Copyright (C) 2004-2009, 2011-2013 LIU Yu, pineapple.liu@gmail.com          *
  * All rights reserved.                                                        *
  *                                                                             *
  * Redistribution and use in source and binary forms, with or without          *
@@ -306,19 +306,6 @@ sandbox_execute(sandbox_t * psbox)
         DBUG("applied realtime scheduling policy");
     }
 #endif /* WITH_REALTIME_SCHED */
-
-#ifdef WITH_TRACE_POOL
-#else   
-    /* Block as many signals as possible */
-    sigset_t sigmask, oldmask;
-    sigfillset(&sigmask);
-    if (pthread_sigmask(SIG_BLOCK, &sigmask, &oldmask) != 0)
-    {
-        WARN("pthread_sigmask");
-        FUNC_RET("%p", &psbox->result);
-    }
-    DBUG("blocked all signals");
-#endif /* WITH_TRACE_POOL */
     
     LOCK(psbox, EX);
     
@@ -399,16 +386,6 @@ sandbox_execute(sandbox_t * psbox)
         ++cnt;
     }
     DBUG("joined %d of %d monitor threads", cnt, all);
-    
-#ifdef WITH_TRACE_POOL
-#else
-    /* Restore old signal mask */
-    if (pthread_sigmask(SIG_SETMASK, &oldmask, NULL) != 0)
-    {
-        WARN("pthread_sigmask");
-    }
-    DBUG("restored old signal mask");
-#endif /* WITH_TRACE_POOL */
     
     FUNC_RET("%p", &psbox->result);
 }
@@ -815,6 +792,7 @@ __sandbox_ctrl_init(ctrl_t * pctrl, thread_func_t tft)
     pctrl->policy.entry = (void *)sandbox_default_policy;
     pctrl->policy.data = 0L;
     memset(pctrl->monitor, 0, (SBOX_MONITOR_MAX) * sizeof(worker_t));
+    memset(&pctrl->tracer, 0, sizeof(worker_t));
     pctrl->tracer.target = tft;
     __QUEUE_CLEAR(pctrl);
     
@@ -829,6 +807,7 @@ __sandbox_ctrl_fini(ctrl_t * pctrl)
     
     __QUEUE_CLEAR(pctrl);
     pctrl->tracer.target = NULL;
+    memset(&pctrl->tracer, 0, sizeof(worker_t));
     memset(pctrl->monitor, 0, (SBOX_MONITOR_MAX) * sizeof(worker_t));
     
     PROC_END();
@@ -860,7 +839,7 @@ sandbox_watcher(sandbox_t * psbox)
     
     /* Temporary variables. */
     LOCK(psbox, SH);
-    const pthread_t profiler = psbox->ctrl.monitor[0].tid;
+    const pthread_t profiler_thread = psbox->ctrl.monitor[0].tid;
     const pid_t pid = psbox->ctrl.pid;
     ctrl_t * const pctrl = &psbox->ctrl;
     proc_t proc = {0};
@@ -872,9 +851,6 @@ sandbox_watcher(sandbox_t * psbox)
     int w_res = 0;
     long sc_stack[8] = {0};
     int sc_top = 0;
-    
-    /* Clear cache in order to increase timing accuracy */
-    cache_flush();
     
     /* Entering the watching loop */
     while ((w_res = waitid(P_PID, pid, &w_info, w_opt)) >= 0)
@@ -1014,40 +990,7 @@ sandbox_watcher(sandbox_t * psbox)
         }
         
         /* Notify the profiler thread to collect and examine stat */
-        pthread_kill(profiler, SIGSTAT);
-        
-        /* Out-of-quota (memory) events always happen on the return of relevant
-         * system calls, i.e. brk(), mmap(), etc. So we perform memory usage
-         * profiling as follows rather than in the profiler thread. */
-        {
-            LOCK(psbox, EX);
-            
-            /* mem_info */
-            #define MEM_UPDATE(a,b) \
-            {{{ \
-                (a) = (b); \
-                (a ## _peak) = (((a ## _peak) > (a)) ? (a ## _peak) : (a)); \
-            }}} /* MEM_UPDATE */
-            
-            MEM_UPDATE(psbox->stat.mem_info.vsize, proc.vsize);
-            MEM_UPDATE(psbox->stat.mem_info.rss, proc.rss * getpagesize());
-            psbox->stat.mem_info.minflt = proc.minflt;
-            psbox->stat.mem_info.majflt = proc.majflt;
-            
-            /* Compare memory usage against quota limit, raise out-of-quota 
-             * (memory) event when necessary. */
-            if (psbox->stat.mem_info.vsize_peak > \
-                psbox->task.quota[S_QUOTA_MEMORY])
-            {
-                DBUG("memory quota exceeded");
-                UNLOCK(psbox);
-                POST_EVENT(psbox, _QUOTA, S_QUOTA_MEMORY);
-            }
-            else
-            {
-                UNLOCK(psbox);
-            }
-        }
+        pthread_kill(profiler_thread, SIGSTAT);
         
         /* Deliver pending events to the policy module for investigation */
         LOCK(psbox, SH);
@@ -1274,38 +1217,6 @@ sandbox_profiler(sandbox_t * psbox)
     psbox->stat.started = ts;
     UNLOCK(psbox);
     
-#ifdef WITH_TRACE_POOL
-#else
-    
-    /* Stop-watch timer for emiting SIGSTAT signals, upon which the profiler
-     * collects and examines elapsed wallclock time and memory usage stat. */
-    
-    timer_t sw_timer = sandbox_timer(SIGSTAT, STAT_FREQ);
-    if (errno != 0)
-    {
-        MONITOR_ERROR(psbox, "failed to create stop-watch timer");
-        MONITOR_END(psbox);
-    }
-    DBUG("created: stop-watch timer at %dHz", STAT_FREQ);
-    
-    /* Profiling timer for emitting SIGPROF signals. The timer will fire 
-     * periodically at a freq of PROF_FREQ (Hz). At a freq of 200Hz, the cpu 
-     * clock of the prisoner process is sampled once every 5msec, and the
-     * accuracy of profiling is expected to be within 10msec. After the first 
-     * out-of-quota (cpu) event, the profiling timer will be stopped. The user-
-     * specified policy module still sees consequent out-of-quota (cpu) events 
-     * triggerred by SIGSTAT, but at a relative low frequency. */
-    
-    timer_t pf_timer = sandbox_timer(SIGPROF, PROF_FREQ);
-    if (errno != 0)
-    {
-        MONITOR_ERROR(psbox, "failed to create profiling timer");
-        MONITOR_END(psbox);
-    }
-    DBUG("created: profiling timer at %dHz", PROF_FREQ);
-    
-#endif /* WITH_TRACE_POOL */
-    
     /* Wait until the watcher thread has seen the initial SIGTRAP, and that the
      * prisoner process has mapped in the executable through execve(). This is
      * essential for correct memory profiling, because in between fork() and
@@ -1318,13 +1229,6 @@ sandbox_profiler(sandbox_t * psbox)
     sigaddset(&sigmask, SIGEXIT);
     sigaddset(&sigmask, SIGSTAT);
     sigaddset(&sigmask, SIGPROF);
-
-#ifdef WITH_TRACE_POOL
-#else
-    sigaddset(&sigmask, SIGTERM);
-    sigaddset(&sigmask, SIGQUIT);
-    sigaddset(&sigmask, SIGINT);
-#endif /* WITH_TRACE_POOL */
     
     LOCK_ON_COND(psbox, SH, !IS_BLOCKED(psbox));
     
@@ -1346,13 +1250,45 @@ sandbox_profiler(sandbox_t * psbox)
             /* Collect stat of the prisoner process */        
             if (!proc_probe(pid, PROBE_STAT, &proc))
             {
-                MONITOR_ERROR(psbox, "failed to probe process: %d", pid);
+                WARN("failed to probe process: %d", pid);
+                /* Do NOT raise monitor error here because the prisoner process
+                 * may have gone making proc_probe() to fail. */
                 break;
             }
             
+            /* mem_info */
             LOCK(psbox, EX);
             
+            #define MEM_UPDATE(a,b) \
+            {{{ \
+                (a) = (b); \
+                (a ## _peak) = (((a ## _peak) > (a)) ? (a ## _peak) : (a)); \
+            }}} /* MEM_UPDATE */
+            
+            MEM_UPDATE(psbox->stat.mem_info.vsize, proc.vsize);
+            MEM_UPDATE(psbox->stat.mem_info.rss, proc.rss * getpagesize());
+            psbox->stat.mem_info.minflt = proc.minflt;
+            psbox->stat.mem_info.majflt = proc.majflt;
+            
+            /* Compare memory usage against quota limit, raise out-of-quota 
+             * (memory) event when necessary. */
+            if (psbox->stat.mem_info.vsize_peak > \
+                psbox->task.quota[S_QUOTA_MEMORY])
+            {
+                DBUG("memory quota exceeded");
+                UNLOCK(psbox);
+                POST_EVENT(psbox, _QUOTA, S_QUOTA_MEMORY);
+                trace_kill(&proc, SIGSTOP);
+                trace_kill(&proc, SIGCONT);
+            }
+            else
+            {
+                UNLOCK(psbox);
+            }
+            
             /* cpu_info */
+            LOCK(psbox, EX);
+            
             #define CPU_UPDATE(a,x) \
             {{{ \
                 ((a).tv_sec) = ((((x).tv_sec) > ((a).tv_sec)) ? \
@@ -1378,7 +1314,7 @@ sandbox_profiler(sandbox_t * psbox)
             
             LOCK(psbox, EX);
             
-            TS_SUBTRACT(ts, psbox->stat.started);
+            TS_INPLACE_SUB(ts, psbox->stat.started);
             psbox->stat.elapsed = ts;
             
             /* Compare elapsed time against quota limit, raise out-of-quota 
@@ -1406,7 +1342,6 @@ sandbox_profiler(sandbox_t * psbox)
                  * may have gone making the clock invalid. */
                 break;
             }
-            
             /* Update sandbox stat with the sampled data */
             LOCK(psbox, EX);
             psbox->stat.cpu_info.clock = ts;
@@ -1417,22 +1352,10 @@ sandbox_profiler(sandbox_t * psbox)
                 POST_EVENT(psbox, _QUOTA, S_QUOTA_CPU);
                 trace_kill(&proc, SIGSTOP);
                 trace_kill(&proc, SIGCONT);
-#ifdef WITH_TRACE_POOL
                 /* Block the profiling signal upon the first out-of-quota (cpu)
                  * event. This avoids jamming the event queue in case the user-
                  * specified policy module ignores out-of-quota events. */
                 sigdelset(&sigmask, SIGPROF);
-#else
-                /* Stop the profiling timer upon the first out-of-quota (cpu)
-                 * event. This avoids jamming the event queue in case the user-
-                 * specified policy module ignores out-of-quota events. */
-                struct itimerspec its;
-                its.it_interval.tv_sec = 0;
-                its.it_interval.tv_nsec = ms2ns(1000 / PROF_FREQ);
-                its.it_value.tv_sec = 0;
-                its.it_value.tv_nsec = 0;
-                timer_settime(pf_timer, 0, &its, NULL);
-#endif /* WITH_TRACE_POOL */
             }
             else
             {
@@ -1440,7 +1363,6 @@ sandbox_profiler(sandbox_t * psbox)
             }
             break;
         case SIGEXIT:    
-#ifdef WITH_TRACE_POOL
             if (siginfo.si_code != SI_QUEUE)
             {
                 DBUG("termination signal %d", signo);
@@ -1468,9 +1390,6 @@ sandbox_profiler(sandbox_t * psbox)
                 MONITOR_ERROR(psbox, "unexpected signal %d", siginfo.si_int);
                 break;
             }
-#else
-            DBUG("termination signal %d", signo);
-#endif /* WITH_TRACE_POOL */
             /* Do NOT exit the profiling loop immediately. Instead, go back to
              * the front to verify if the watcher thread is already finished. */
             break;
@@ -1481,97 +1400,8 @@ check_status:
     }
     UNLOCK(psbox);
     
-#ifdef WITH_TRACE_POOL
-#else
-    timer_delete(sw_timer);
-    timer_delete(pf_timer);
-#endif
-    
     MONITOR_END(psbox);
 }
-
-#ifdef WITH_TRACE_POOL
-
-void *
-sandbox_manager(sandbox_pool_t * const pool)
-{
-    FUNC_BEGIN("%p", pool);
-    assert(pool);
-    
-    /* Stop-watch timer for emiting SIGSTAT signals. The timer will fire
-     * periodically at a freq of STAT_FREQ (Hz), which coordinates the profiler
-     * threads of active sandbox instances to collect resource usage stat. */
-    
-    timer_t sw_timer = sandbox_timer(SIGSTAT, STAT_FREQ);
-    if (errno != 0)
-    {
-        WARN("failed to create stop-watch timer");
-        FUNC_RET("%p", (void *)NULL);
-    }
-    DBUG("created stop-watch timer at %dHz", STAT_FREQ);
-    
-    /* Profiling timer for emitting SIGPROF signals. The timer will fire 
-     * periodically at a freq of PROF_FREQ (Hz), which coordinates the profiler
-     * threads of active sandbox instances to sample the cpu clock time of
-     * respective prisoner processes. At a frequency of 200Hz, the cpu clocks
-     * are sampled once every 5msec, and the accuracy of time profiling is 
-     * expected to be within 10msec on contemporary hardware platforms. */
-    
-    timer_t pf_timer = sandbox_timer(SIGPROF, PROF_FREQ);
-    if (errno != 0)
-    {
-        WARN("failed to create profiling timer");
-        FUNC_RET("%p", (void *)NULL);
-    }
-    DBUG("created profiling timer at %dHz", PROF_FREQ);
-    
-    sigset_t sigmask;
-    sigemptyset(&sigmask);
-    sigaddset(&sigmask, SIGEXIT);
-    sigaddset(&sigmask, SIGSTAT);
-    sigaddset(&sigmask, SIGPROF);
-    sigaddset(&sigmask, SIGTERM);
-    sigaddset(&sigmask, SIGQUIT);
-    sigaddset(&sigmask, SIGINT);
-    
-    bool end = false;
-    while (!end)
-    {
-        int signo;
-        siginfo_t siginfo;
-        if ((signo = sigwaitinfo(&sigmask, &siginfo)) < 0)
-        {
-            WARN("failed to sigwaitinfo()");
-            continue;
-        }
-        
-        if (signo == SIGEXIT)
-        {
-            end = true;
-            signo = SIGKILL;
-        }
-        
-        /* Broadcast signals to active sandbox instances */
-        P(&global_mutex);
-        sandbox_ref_t * item;
-        SLIST_FOREACH(item, pool, entries)
-        {
-            sandbox_notify(item->psbox, signo);
-        }
-        V(&global_mutex);
-    }
-    
-    timer_delete(sw_timer);
-    timer_delete(pf_timer);
-    
-    FUNC_RET("%p", (void *)pool);
-}
-
-sandbox_pool_t sandbox_pool = SLIST_HEAD_INITIALIZER(sandbox_pool);
-
-#endif /* TRACE_POOL */
-
-pthread_mutex_t global_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 #ifdef __cplusplus
 } /* extern "C" */

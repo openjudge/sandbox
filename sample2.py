@@ -53,12 +53,6 @@ except AssertionError as e:
     sys.exit(os.EX_UNAVAILABLE)
 
 
-# result code translation
-def result_name(r):
-    return ('PD', 'OK', 'RF', 'ML', 'OL', 'TL', 'RT', 'AT', 'IE', 'BP')[r] \
-        if r in range(10) else None
-
-
 def main(args):
     # sandbox configuration
     cookbook = {
@@ -86,6 +80,9 @@ class MiniSandbox(SandboxPolicy, Sandbox):
     sc_safe = dict(i686=set([0, 3, 4, 19, 45, 54, 90, 91, 122, 125, 140,
         163, 192, 197, 224, 243, 252, ]), x86_64=set([0, 1, 5, 8, 9, 10,
         11, 12, 16, 25, 63, 158, 219, 231, ]), )
+    # result code translation table
+    result_name = dict((getattr(Sandbox, 'S_RESULT_%s' % r), r) for r in
+        ('PD', 'OK', 'RF', 'RT', 'TL', 'ML', 'OL', 'AT', 'IE', 'BP'))
 
     def __init__(self, *args, **kwds):
         # initialize table of system call rules
@@ -102,7 +99,7 @@ class MiniSandbox(SandboxPolicy, Sandbox):
         d = Sandbox.probe(self, False)
         d['cpu'] = d['cpu_info'][0]
         d['mem'] = d['mem_info'][1]
-        d['result'] = result_name(self.result)
+        d['result'] = MiniSandbox.result_name.get(self.result, 'NA')
         return d
 
     def __call__(self, e, a):

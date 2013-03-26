@@ -381,7 +381,7 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
 }
 
 int
-proc_syscall_mode(proc_t * const pproc)
+proc_abi(proc_t * const pproc)
 {
     FUNC_BEGIN("%p", pproc);
     assert(pproc);
@@ -779,7 +779,7 @@ __trace(option_t option, proc_t * const pproc, void * const addr,
     /* Wait while the option is being performed */
     while (trace_info.option != T_OPTION_ACK)
     {
-        DBUG("requesting trace option: %s", t_option_name(trace_info.option));
+        DBUG("requesting trace option: %s", s_trace_opt_name(trace_info.option));
         pthread_cond_wait(&trace_update, &global_mutex);
     }
     
@@ -852,7 +852,7 @@ sandbox_tracer(void * const dummy)
             continue;
         }
         
-        DBUG("received trace option: %s", t_option_name(trace_info.option));
+        DBUG("received trace option: %s", s_trace_opt_name(trace_info.option));
         
         if (trace_info.option == T_OPTION_END)
         {
@@ -868,11 +868,11 @@ sandbox_tracer(void * const dummy)
         
         while (trace_info.option == T_OPTION_ACK)
         {
-            DBUG("sending trace option: %s", t_option_name(T_OPTION_ACK));
+            DBUG("sending trace option: %s", s_trace_opt_name(T_OPTION_ACK));
             pthread_cond_wait(&trace_update, &global_mutex);
         }
         
-        DBUG("sent trace option: %s", t_option_name(T_OPTION_ACK));
+        DBUG("sent trace option: %s", s_trace_opt_name(T_OPTION_ACK));
     }
     V(&global_mutex);
     
@@ -952,8 +952,6 @@ sandbox_manager(sandbox_pool_t * const pool)
      * is the planned profiling cycle (cycle), PV is the measured profiling 
      * cycle (delta), and MV is the calibrated time for sleep (timeout). */
     
-    #define dbl_ts2ms(x) (0.000001 * (x).tv_nsec + 1000.0 * (x).tv_sec)
-    
     const struct timespec ZERO = {0, 0};
     
     struct timespec cycle = {0, ms2ns(1000 / PROF_FREQ)};
@@ -970,7 +968,7 @@ sandbox_manager(sandbox_pool_t * const pool)
             cycle = eps;
         }
     }
-    DBUG("manager broadcasting at %.2lfHz", 1000. / dbl_ts2ms(cycle));
+    DBUG("manager broadcasting at %.2lfHz", 1000. / fts2ms(cycle));
     
     /* Parameters for sleep time calibration */
     const double Kp = 0.75, Ki = 0.25, Kd = 0.0;
@@ -978,7 +976,7 @@ sandbox_manager(sandbox_pool_t * const pool)
     const struct timespec MV_MAX = cycle;
     
     DBUG("SP=%.2lf / Kp=%.2lf, Ki=%.2lf, Kd=%.2lf / MV=[%.2lf, %.2lf]", 
-        dbl_ts2ms(cycle), Kp, Ki, Kd, dbl_ts2ms(MV_MIN), dbl_ts2ms(MV_MAX));
+        fts2ms(cycle), Kp, Ki, Kd, fts2ms(MV_MIN), fts2ms(MV_MAX));
     
     struct timespec timeout = cycle;
     struct timespec t = ZERO;
@@ -1069,12 +1067,12 @@ sandbox_manager(sandbox_pool_t * const pool)
             struct timespec feedback = ZERO;
             {
                 /* Convert msec feedback to struct timespec equivalent */
-                long double _fb_msec = Kp * dbl_ts2ms(error) + 
-                    Ki * dbl_ts2ms(integral) + Kd * dbl_ts2ms(derivative);
-                long double _fb_int = 0.0;
-                long double _fb_frac = modfl(_fb_msec / 1000.0, &_fb_int);
-                feedback = (struct timespec){lrintl(_fb_int), 
-                lrintl(ms2ns(_fb_frac * 1000.0))}; 
+                long double fb_msec = Kp * fts2ms(error) + 
+                    Ki * fts2ms(integral) + Kd * fts2ms(derivative);
+                long double fb_int = 0.0;
+                long double fb_frac = modfl(fb_msec / 1000.0, &fb_int);
+                feedback = (struct timespec){lrintl(fb_int), 
+                    lrintl(ms2ns(fb_frac * 1000.0))}; 
             }
             
             timeout = cycle;
@@ -1089,8 +1087,8 @@ sandbox_manager(sandbox_pool_t * const pool)
             }
             
             DBUG("manager beacon (%06lu): PV=%.2lf / P=%.2lf, I=%.2lf, D=%.2lf"
-                " / MV=%.2lf", count, dbl_ts2ms(delta), dbl_ts2ms(error), 
-                dbl_ts2ms(integral), dbl_ts2ms(derivative), dbl_ts2ms(timeout));
+                " / MV=%.2lf", count, fts2ms(delta), fts2ms(error), 
+                fts2ms(integral), fts2ms(derivative), fts2ms(timeout));
             
             prev_error = error;
             error = ZERO;

@@ -189,7 +189,7 @@ END {
     print ""
 
     print "const char *"
-    print "t_option_name(int option)"
+    print "s_trace_opt_name(int option)"
     print "{"
     print "    static const char * table[] = "
     print "    {"

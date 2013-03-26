@@ -157,12 +157,12 @@ typedef struct
  * @return 0 for native type, 1, 2, ... for valid alternative types, and 
  * \c SCMODE_MAX for unknown type
  */
-int proc_syscall_mode(proc_t * const);
+int proc_abi(proc_t * const);
 
 #define THE_SCMODE(pproc) \
     RVAL_IF(!((pproc)->tflags.is_in_syscall) && \
             ((pproc)->tflags.not_wait_execve)) \
-        (pproc)->tflags.syscall_mode = proc_syscall_mode(pproc) \
+        (pproc)->tflags.syscall_mode = proc_abi(pproc) \
     RVAL_ELSE \
         (pproc)->tflags.syscall_mode \
     RVAL_FI \

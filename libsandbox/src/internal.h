@@ -324,6 +324,7 @@ extern "C"
 /* Macros for manipulating struct timespec from <time.h> */
 #define ms2ns(x) (1000000 * (x))
 #define ts2ms(x) ((((x).tv_sec) * 1000) + (((x).tv_nsec) / 1000000))
+#define fts2ms(x) ((0.000001 * ((x).tv_nsec)) + (1000.0 * ((x).tv_sec)))
 
 #define TS_LESS(x,y) \
     RVAL_IF((x).tv_sec < (y).tv_sec) \
@@ -393,7 +394,7 @@ const char * s_result_name(int result);
  * @param[in] option any of the constant values defined in \c option_t
  * @return a statically allocated string name for the specified option.
  */
-const char * t_option_name(int option);
+const char * s_trace_opt_name(int option);
 
 #ifdef __cplusplus
 } /* extern "C" */

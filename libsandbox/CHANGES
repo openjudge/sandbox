@@ -1,3 +1,7 @@
+[2013/03/31] LIU Yu, <pineapple.liu@gmail.com>
+  * in platform.{h,c} renamed proc_syscall_mode() -> proc_abi()
+  * in internal.{h,awk} renamed t_option_name() -> s_trace_opt_name()
+
 [2013/03/23] LIU Yu, <pineapple.liu@gmail.com>
   * in platform.c renamed sandbox_ref_t -> sandbox_mgr_t
   * in platform.c fixed SIGPROF / SIGSTAT frequency mismatch

@@ -926,11 +926,11 @@ sandbox_watcher(sandbox_t * psbox)
                         SET_IN_SYSCALL(&proc);
                         sc_stack[++sc_top] = sc;
                         POST_EVENT(psbox, _SYSCALL, sc, SYSCALL_ARG1(&proc),
-                                                       SYSCALL_ARG2(&proc),
-                                                       SYSCALL_ARG3(&proc),
-                                                       SYSCALL_ARG4(&proc),
-                                                       SYSCALL_ARG5(&proc),
-                                                       SYSCALL_ARG6(&proc));
+                                                        SYSCALL_ARG2(&proc),
+                                                        SYSCALL_ARG3(&proc),
+                                                        SYSCALL_ARG4(&proc),
+                                                        SYSCALL_ARG5(&proc),
+                                                        SYSCALL_ARG6(&proc));
                     }
                     else
                     {

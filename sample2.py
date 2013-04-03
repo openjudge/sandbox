@@ -2,7 +2,7 @@
 ################################################################################
 # The Sandbox Libraries (Python) - Sample Script                               #
 #                                                                              #
-# Copyright (C) 2009-2012 LIU Yu, <pineapple.liu@gmail.com>                    #
+# Copyright (C) 2009-2013 LIU Yu, <pineapple.liu@gmail.com>                    #
 # All rights reserved.                                                         #
 #                                                                              #
 # Redistribution and use in source and binary forms, with or without           #
@@ -86,13 +86,18 @@ class MiniSandbox(SandboxPolicy, Sandbox):
 
     def __init__(self, *args, **kwds):
         # initialize table of system call rules
-        self.sc_table = [self._KILL_RF, ] * 1024
-        for scno in MiniSandbox.sc_safe[machine]:
-            self.sc_table[scno] = self._CONT
+        self.sc_table = dict()
+        if machine == 'x86_64':
+            for (mode, abi) in ((0, 'x86_64'), (1, 'i686'), ):
+                for scno in MiniSandbox.sc_safe[abi]:
+                    self.sc_table[(scno, mode)] = self._CONT
+        else:  # i686
+            for scno in MiniSandbox.sc_safe[machine]:
+                self.sc_table[scno] = self._CONT
         # initialize as a polymorphic sandbox-and-policy object
         SandboxPolicy.__init__(self)
         Sandbox.__init__(self, *args, **kwds)
-        self.policy = self
+        self.policy = self  # apply local policy rules
 
     def probe(self):
         # add custom entries into the probe dict
@@ -105,9 +110,9 @@ class MiniSandbox(SandboxPolicy, Sandbox):
     def __call__(self, e, a):
         # handle SYSCALL/SYSRET events with local rules
         if e.type in (S_EVENT_SYSCALL, S_EVENT_SYSRET):
-            if machine == 'x86_64' and e.ext0 != 0:
-                return self._KILL_RF(e, a)
-            return self.sc_table[e.data](e, a)
+            scinfo = (e.data, e.ext0) if machine == 'x86_64' else e.data
+            rule = self.sc_table.get(scinfo, self._KILL_RF)
+            return rule(e, a)
         # bypass other events to base class
         return SandboxPolicy.__call__(self, e, a)
 
@@ -118,7 +123,6 @@ class MiniSandbox(SandboxPolicy, Sandbox):
     def _KILL_RF(self, e, a):  # restricted func.
         a.type, a.data = S_ACTION_KILL, S_RESULT_RF
         return a
-    pass
 
 
 if __name__ == "__main__":

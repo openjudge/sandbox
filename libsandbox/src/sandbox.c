@@ -1237,7 +1237,7 @@ sandbox_profiler(sandbox_t * psbox)
         UNLOCK(psbox);
         
         int signo;
-        siginfo_t siginfo;  
+        siginfo_t siginfo;
         if ((signo = sigwaitinfo(&sigmask, &siginfo)) < 0)
         {
             WARN("failed to sigwaitinfo()");
@@ -1247,7 +1247,7 @@ sandbox_profiler(sandbox_t * psbox)
         switch (signo)
         {
         case SIGSTAT:
-            /* Collect stat of the prisoner process */        
+            /* Collect stat of the prisoner process */
             if (!proc_probe(pid, PROBE_STAT, &proc))
             {
                 WARN("failed to probe process: %d", pid);
@@ -1362,7 +1362,7 @@ sandbox_profiler(sandbox_t * psbox)
                 UNLOCK(psbox);
             }
             break;
-        case SIGEXIT:    
+        case SIGEXIT:
             if (siginfo.si_code != SI_QUEUE)
             {
                 DBUG("termination signal %d", signo);

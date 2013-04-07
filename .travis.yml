@@ -3,6 +3,7 @@ python:
   - "2.6"
   - "2.7"
   - "3.2"
+  - "3.3"
 
 env:
   - SBOX_HOME=~/.sbox PATH="$PATH:$SBOX_HOME/bin" PYTHONPATH="$PYTHONPATH:$SBOX_HOME/lib/python"

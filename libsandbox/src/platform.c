@@ -144,7 +144,7 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
         FUNC_RET("%d", false);
     }
     
-    char buffer[4096];    
+    char buffer[4096];
     sprintf(buffer, PROCFS "/%d/stat", pid);
    
     int fd = open(buffer, O_RDONLY);
@@ -345,9 +345,9 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
     if (opt & PROBE_OP)
     {
 #ifdef __x86_64__
-        unsigned char * addr = (unsigned char *)pproc->regs.rip;
+        unsigned long addr = pproc->regs.rip;
 #else /* __i386__ */
-        unsigned char * addr = (unsigned char *)pproc->regs.eip;
+        unsigned long addr = pproc->regs.eip;
 #endif /* __x86_64__ */
 
         if (!pproc->tflags.single_step)
@@ -355,8 +355,7 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
             addr -= 2; /* backoff 2 bytes in system call tracing mode */
         }
         
-        if (__trace(T_OPTION_GETDATA, pproc, (void *)addr, 
-            (long *)&pproc->op) != 0)
+        if (!proc_dump(pproc, (void *)addr, sizeof(long), (char *)&pproc->op))
         {
             FUNC_RET("%d", false);
         }
@@ -441,20 +440,25 @@ proc_abi(proc_t * const pproc)
      * rather than at the actual system call instruction (e.g. SYSENTER).
      * I observed this issue when running static ELF-i386 programs on 
      * kernel-2.6.32-220.7.1.el6.x86_64. Perhaps a bug in the way the Linux 
-     * kernel handles ptrace(). As a workaround, we can follow the JMP for 
-     * a few steps to locate the actual instruction. In its current status,
-     * we have only implemented JMP REL (i.e. EB and E9) inspection. Other 
+     * kernel handles ptrace(). As a workaround, we can follow the JMP, and
+     * try to locate the actual syscall instruction. In its current status,
+     * we have only implemented JMP REL (i.e. EB and E9) decoding. Other 
      * types of JMP / CALL instructions are treated as illegal scmode. */
     
-    unsigned char * addr = (unsigned char *)pproc->regs.rip;
+    unsigned long addr = pproc->regs.rip;
+    union
+    {
+        unsigned long data;
+        char byte[sizeof(unsigned long)];
+    } code = {pproc->op};
     
-    switch (OPCODE16(pproc->op) & 0xffUL)
+    switch (OPCODE16(code.data) & 0xffUL)
     {
     case 0xeb: /* jmp rel short */
-        addr += (char)((pproc->op & 0xff00UL) >> 8);
+        addr += (char)((code.data & 0xff00UL) >> 8);
         break;
     case 0xe9: /* jmp rel */
-        addr += (int)((pproc->op & 0xffffffff00UL) >> 8);
+        addr += (int)((code.data & 0xffffffff00UL) >> 8);
         break;
     case 0xea: /* jmp far */
     case 0xff: /* call */
@@ -463,29 +467,34 @@ proc_abi(proc_t * const pproc)
         break;
     }
     
-    unsigned long code;
-    if (__trace(T_OPTION_GETDATA, pproc, addr, (long *)&code) != 0)
+    if (!proc_dump(pproc, (void *)addr, sizeof(code), code.byte))
     {
         FUNC_RET("%d", SCMODE_MAX);
     }
     
+    /* code now contains the initial instructions from the vsyscall entry.
+     * We assume no further jmp's before reaching the real syscall instruction,
+     * otherwise, we will have to implement a full x86_64 disassembler :-( */
     size_t offset;
     for (offset = 0; offset < sizeof(long) - 1; offset++)
     {
-        if ((OPCODE16(code) == OP_INT80) || \
-            (OPCODE16(code) == OP_SYSENTER) || \
-            (OPCODE16(code) == OP_SYSCALL))
+        if ((OPCODE16(code.data) == OP_INT80) || \
+            (OPCODE16(code.data) == OP_SYSENTER) || \
+            (OPCODE16(code.data) == OP_SYSCALL))
         {
+            /* write the correct rip and op back to the process stat buffer */
             addr += offset;
-            if (__trace(T_OPTION_GETDATA, pproc, addr, (long *)&pproc->op) != 0)
+            if (!proc_dump(pproc, (void *)addr, sizeof(code), code.byte))
             {
                 FUNC_RET("%d", SCMODE_MAX);
             }
-            DBUG("vsyscall_addr       0x%016lx", (unsigned long)addr);
-            DBUG("vsyscall_code       0x%016lx", pproc->op);
+            pproc->regs.rip = addr;
+            pproc->op = code.data;
+            DBUG("vsyscall_addr       0x%016lx", addr);
+            DBUG("vsyscall_code       0x%016lx", code.data);
             break;
         }
-        code = (code >> 8);
+        code.data = (code.data >> 8);
     }
     
 #endif /* __x86_64__ */
@@ -496,22 +505,73 @@ proc_abi(proc_t * const pproc)
 
 bool
 proc_dump(const proc_t * const pproc, const void * const addr, 
-          long * const pword)
+          size_t len, char * const buff)
 {
-    FUNC_BEGIN("%p,%p,%p", pproc, addr, pword);
-    assert(pproc && addr && pword);
+    FUNC_BEGIN("%p,%p,%zu,%p", pproc, addr, len, (void * const)buff);
+    assert(pproc && (addr || true) && (len > 0) && buff);
     
-    if ((pproc == NULL) || (addr == NULL) || (pword == NULL))
+    if ((pproc == NULL) || (addr == NULL) || (len <= 0) || (buff == NULL))
     {
+        errno = (addr == NULL) ? (EIO) : (EINVAL);
         FUNC_RET("%d", false);
     }
     
-    if (__trace(T_OPTION_GETDATA, (proc_t *)pproc, (void *)addr, pword) != 0)
-    {
-        FUNC_RET("%d", false);
-    }    
+    /* Adjust address when it is not word-aligned. Also take care of some
+     * exceptional conditions. The following method was mostly learned from
+     * the umoven() function from strace-4.4.98 (util.c) */
+    #ifndef MIN
+    #define MIN(a,b) (((a) < (b)) ? (a) : (b))
+    #endif
     
-    DBUG("data.%p     0x%016lx", addr, *pword);
+    unsigned long src = (unsigned long)addr;
+    char * dest = buff;
+    bool dumped = false;
+    
+    union
+    {
+        unsigned long data;
+        char byte[sizeof(unsigned long)];
+    } word;
+    
+    if (src & (sizeof(word) - 1))
+    {
+        ssize_t start = src - (src & -sizeof(word));
+        src &= -sizeof(word);
+        if (__trace(T_OPTION_GETDATA, (proc_t *)pproc, (void *)src, 
+                    (long *)&word.data) != 0)
+        {
+            FUNC_RET("%d", false);
+        }
+        ssize_t count = MIN(sizeof(word) - start, len);
+        memcpy(dest, &word.byte[start], count);
+        DBUG("data.%p     0x%016lx", (void *)src, word.data);
+        dumped = true;
+        src += sizeof(word);
+        dest += count;
+        len -= count;
+    }
+    
+    while (len > 0)
+    {
+        if (__trace(T_OPTION_GETDATA, (proc_t *)pproc, (void *)src, 
+                    (long *)&word.data) != 0)
+        {
+            /* Reached 'end of memory', but alreay dumped some memory blocks */
+            if (dumped && ((errno == EPERM) || (errno == EIO)))
+            {
+                errno = EFAULT;
+                FUNC_RET("%d", false);
+            }
+            FUNC_RET("%d", false);
+        }
+        ssize_t count = MIN(sizeof(word), len);
+        memcpy(dest, word.byte, count);
+        DBUG("data.%p     0x%016lx", (void *)src, word.data);
+        dumped = true;
+        src += sizeof(word);
+        dest += count;
+        len -= count;
+    }
     
 #ifdef DELETED
 #ifdef HAVE_PROCFS
@@ -533,7 +593,7 @@ proc_dump(const proc_t * const pproc, const void * const addr,
         WARN("lseek(%d, %p, SEEK_SET) failes, ERRNO %d", fd, addr, errno);
         FUNC_RET("%d", false);
     }
-    if (read(fd, (void *)pword, sizeof(unsigned long)) < 0)
+    if (read(fd, (void *)pword, sizeof(long)) < 0)
     {
         WARN("read");
         FUNC_RET("%d", false);
@@ -691,7 +751,7 @@ __trace_impl(option_t option, proc_t * const pproc, void * const addr,
         {
             long temp = ptrace(PTRACE_PEEKDATA, pid, addr, NULL);
             res = errno;
-            *pdata = (res != 0)?(*pdata):(temp);
+            *pdata = (res != 0) ? (*pdata) : (temp);
         }
         break;
     case T_OPTION_SETDATA:
@@ -771,7 +831,7 @@ __trace(option_t option, proc_t * const pproc, void * const addr,
     trace_info.option = option;
     trace_info.pproc = pproc;
     trace_info.addr = addr;
-    trace_info.data = ((pdata != NULL)?(*pdata):(0));
+    trace_info.data = ((pdata != NULL) ? (*pdata) : (0));
     trace_info.result = 0;
     trace_info.errnum = errno;
     pthread_cond_broadcast(&trace_update);

@@ -75,7 +75,7 @@ BEGIN {
     print ""
     
     nevent = 0
-    ievent = 0;    
+    ievent = 0;
     naction = 0;
     iaction = 0;
     nstatus = 0;

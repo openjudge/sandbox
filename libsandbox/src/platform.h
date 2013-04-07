@@ -140,24 +140,60 @@ typedef struct
     unsigned long op;           /**< current instruction */
 } proc_t;
 
-/* Macros for composing conditional rvalue */
-#define RVAL_IF(x)              ((x)?(
-#define RVAL_ELSE               ):(
-#define RVAL_FI                 ))
-
 #define NOT_WAIT_EXECVE(pproc) \
     ((pproc)->tflags.not_wait_execve++) \
 /* NOT_WAIT_EXECVE */
 
-#ifdef __linux__
+/**
+ * @brief Bind an empty process stat buffer with a sandbox instance.
+ * @param[in] psbox pointer to the sandbox instance
+ * @param[out] pproc pointer to any process stat buffer
+ * @return true on success
+ */
+bool proc_bind(const void * const psbox, proc_t * const pproc);
+
+/**
+ * @brief Process probing options.
+ */
+typedef enum
+{
+    PROBE_STAT = 0,             /**< probe procfs for process status */
+    PROBE_REGS = 1,             /**< probe user registers */
+    PROBE_OP = 3,               /**< probe current instruction */
+    PROBE_SIGINFO = 4,          /**< probe signal info */
+} probe_option_t;
+
+/**
+ * @brief Probe runtime information of specified process.
+ * @param[in] pid id of the prisoner process
+ * @param[in] opt probe options (can be bitwise OR of PROB_STAT, PROB_REGS,
+ *            PROBE_OP, and PROBE_SIGINFO)
+ * @param[out] pproc pointer to a binded process stat buffer
+ * @return true on sucess, false otherwise
+ */
+bool proc_probe(pid_t pid, int opt, proc_t * const pproc);
+
+/**
+ * @brief Dump data from the memory space of the prisoner process
+ * @param[in] pproc pointer to a binded process stat buffer
+ * @param[in] addr target address in the memory space of the prisoner process
+ * @param[in] len number of bytes to dump
+ * @param[in,out] buff data buffer in local space
+ * @return true on success, false otherwise
+ */
+bool proc_dump(const proc_t * const pproc, const void * const addr, 
+               size_t len, char * const buff);
 
 /**
  * @brief Inspect current system call type of a process.
- * @param[in] pproc pointer to a binded process stat buffer
+ * @param[in,out] pproc pointer to an initialized procss stat buffer with
+ * \c regs and \op fields correctly filled by \c proc_probe()
  * @return 0 for native type, 1, 2, ... for valid alternative types, and 
  * \c SCMODE_MAX for unknown type
  */
 int proc_abi(proc_t * const);
+
+#ifdef __linux__
 
 #define THE_SCMODE(pproc) \
     RVAL_IF(!((pproc)->tflags.is_in_syscall) && \
@@ -239,6 +275,7 @@ int proc_abi(proc_t * const);
         MAKE_WORD((pproc)->regs.rbx, 0) \
     RVAL_FI \
 /* SYSCALL_ARG1 */
+
 #define SYSCALL_ARG2(pproc) \
     RVAL_IF(THE_SCMODE(pproc) == SCMODE_LINUX64) \
         ((pproc)->regs.rsi) \
@@ -246,6 +283,7 @@ int proc_abi(proc_t * const);
         MAKE_WORD((pproc)->regs.rcx, 0) \
     RVAL_FI \
 /* SYSCALL_ARG2 */
+
 #define SYSCALL_ARG3(pproc) \
     RVAL_IF(THE_SCMODE(pproc) == SCMODE_LINUX64) \
         ((pproc)->regs.rdx) \
@@ -253,6 +291,7 @@ int proc_abi(proc_t * const);
         MAKE_WORD((pproc)->regs.rdx, 0) \
     RVAL_FI \
 /* SYSCALL_ARG3 */
+
 #define SYSCALL_ARG4(pproc) \
     RVAL_IF(THE_SCMODE(pproc) == SCMODE_LINUX64) \
         ((pproc)->regs.r10) \
@@ -260,6 +299,7 @@ int proc_abi(proc_t * const);
         MAKE_WORD((pproc)->regs.rsi, 0) \
     RVAL_FI \
 /* SYSCALL_ARG4 */
+
 #define SYSCALL_ARG5(pproc) \
     RVAL_IF(THE_SCMODE(pproc) == SCMODE_LINUX64) \
         ((pproc)->regs.r8) \
@@ -267,6 +307,7 @@ int proc_abi(proc_t * const);
         MAKE_WORD((pproc)->regs.rdi, 0) \
     RVAL_FI \
 /* SYSCALL_ARG5 */
+
 #define SYSCALL_ARG6(pproc) \
     RVAL_IF(THE_SCMODE(pproc) == SCMODE_LINUX64) \
         ((pproc)->regs.r9) \
@@ -274,6 +315,7 @@ int proc_abi(proc_t * const);
         MAKE_WORD((pproc)->regs.rbp, 0) \
     RVAL_FI \
 /* SYSCALL_ARG6 */
+
 #define SYSRET_RETVAL(pproc) \
     RVAL_IF(THE_SCMODE(pproc) == SCMODE_LINUX64) \
         ((pproc)->regs.rax) \
@@ -355,7 +397,7 @@ int proc_abi(proc_t * const);
 
 #endif /* __x86_64__ */
 
-#else /* __linux__ */
+#else /* !defined(__linux__) */
 
 #define THE_SCMODE(pproc) 0
 #error "THE_SCMODE is not implemented for this platform"
@@ -376,43 +418,10 @@ int proc_abi(proc_t * const);
 #endif /* __linux__ */
 
 /**
- * @brief Bind an empty process stat buffer with a sandbox instance.
- * @param[in] psbox pointer to the sandbox instance
- * @param[out] pproc pointer to any process stat buffer
+ * @brief Let the current process enter traced state.
  * @return true on success
  */
-bool proc_bind(const void * const psbox, proc_t * const pproc);
-
-/**
- * @brief Process probing options.
- */
-typedef enum
-{
-    PROBE_STAT = 0,             /**< probe procfs for process status */
-    PROBE_REGS = 1,             /**< probe user registers */
-    PROBE_OP = 3,               /**< probe current instruction */
-    PROBE_SIGINFO = 4,          /**< probe signal info */
-} probe_option_t;
-
-/**
- * @brief Probe runtime information of specified process.
- * @param[in] pid id of the prisoner process
- * @param[in] opt probe options (can be bitwise OR of PROB_STAT, PROB_REGS,
- *            PROBE_OP, and PROBE_SIGINFO)
- * @param[out] pproc pointer to a binded process stat buffer
- * @return true on sucess, false otherwise
- */
-bool proc_probe(pid_t pid, int opt, proc_t * const pproc);
-
-/**
- * @brief Copy a word from the specified address of the prisoner process.
- * @param[in] pproc pointer to a binded process stat buffer
- * @param[out] addr address in the memory space of the prisoner process
- * @param[out] pword pointer to a buffer at least 4 bytes in length
- * @return true on success, false otherwise
- */
-bool proc_dump(const proc_t * const pproc, const void * const addr, 
-               long * const pword);
+bool trace_me(void);
 
 /**
  * @brief Subprocess trace methods.

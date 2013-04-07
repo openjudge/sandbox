@@ -49,6 +49,11 @@ extern "C"
 {
 #endif
 
+/* Macros for composing conditional rvalue */
+#define RVAL_IF(x)              ((x) ? (
+#define RVAL_ELSE               ) : (
+#define RVAL_FI                 ))
+
 /* Macros for producing debugging messages */
 #ifndef _LOG
 #ifdef NDEBUG
@@ -173,7 +178,7 @@ extern "C"
         pthread_cond_wait(&((plock)->rdc), &((plock)->mutex)); \
     } \
 }}} 
-#endif /* __RWLOCK_READER_WAIT */  
+#endif /* __RWLOCK_READER_WAIT */
 
 #ifndef __RWLOCK_WRITER_WAIT
 #define __RWLOCK_WRITER_WAIT(plock,cond) \
@@ -359,12 +364,6 @@ extern "C"
         (x).tv_nsec += ms2ns(1000); \
     } \
 }}} /* TS_INPLACE_SUB */
-
-/**
- * @brief Let the current process enter traced state.
- * @return true on success
- */
-bool trace_me(void);
 
 /**
  * @param[in] type any of the constant values defined in \c event_type_t

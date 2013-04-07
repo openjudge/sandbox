@@ -1812,12 +1812,12 @@ Sandbox_dump(Sandbox * self, PyObject * args)
     
     /* Temporary variable(s) */
     char proc[4096] = {0};      /* we don't know about proc_t internals */
-    long data = 0;
+    char data[sizeof(long)] = {0};
     
     /* Prototypes for calling private proc_* routines in libsandbox */
     bool proc_bind(const void * const, void * const);
     bool proc_probe(pid_t, int, void * const);
-    bool proc_dump(const void * const, const void * const, long * const);
+    bool proc_dump(const void * const, const void * const, size_t, char * const);
     
     proc_bind((void *)&Sandbox_GET_SBOX(self), (void *)&proc);
     
@@ -1829,9 +1829,18 @@ Sandbox_dump(Sandbox * self, PyObject * args)
     }
     
     /* Dump data from the prisoner process */
-    if (!proc_dump((const void *)&proc, (const void *)addr, &data))
+    if (!proc_dump((void *)&proc, (void *)addr, sizeof(data), data))
     {
-        PyErr_SetString(PyExc_RuntimeError, MSG_DUMP_DUMP_FAILED);
+        /* If the dump failed due to invalid address or memory out-of-range,
+         * raise ValueError, otherwise raise RuntimeError */
+        if ((errno == EIO) || (errno == EFAULT))
+        {
+            PyErr_SetString(PyExc_ValueError, MSG_DUMP_INVALID);
+        }
+        else
+        {
+            PyErr_SetString(PyExc_RuntimeError, MSG_DUMP_FAILED);
+        }
         UNLOCK(&Sandbox_GET_SBOX(self));
         FUNC_RET("%p", Py_NULL);
     }
@@ -1840,34 +1849,34 @@ Sandbox_dump(Sandbox * self, PyObject * args)
     {
     case T_CHAR:
     case T_BYTE:
-        result = PyLong_FromLong((long)(char)data);
+        result = PyLong_FromLong(*(long *)data);
         break;
     case T_UBYTE:
-        result = PyLong_FromLong((long)(unsigned char)data);
+        result = PyLong_FromLong((long)*(unsigned char *)data);
         break;
     case T_SHORT:
-        result = PyLong_FromLong((long)(short)data);
+        result = PyLong_FromLong((long)*(short *)data);
         break;
     case T_USHORT:
-        result = PyLong_FromLong((long)(unsigned short)data);
+        result = PyLong_FromLong((long)*(unsigned short *)data);
         break;
     case T_FLOAT:
-        result = PyFloat_FromDouble((double)(float)data);
+        result = PyFloat_FromDouble((double)*(float *)data);
         break;
     case T_DOUBLE:
-        result = PyFloat_FromDouble((double)data);
+        result = PyFloat_FromDouble(*(double *)data);
         break;
     case T_INT:
-        result = PyLong_FromLong((long)(int)data);
+        result = PyLong_FromLong((long)*(int *)data);
         break;
     case T_UINT:
-        result = PyLong_FromUnsignedLong((unsigned long)(unsigned int)data);
+        result = PyLong_FromUnsignedLong((unsigned long)*(unsigned int *)data);
         break;
     case T_LONG:
-        result = PyLong_FromLong((long)data);
+        result = PyLong_FromLong(*(long *)data);
         break;
     case T_ULONG:
-        result = PyLong_FromUnsignedLong((unsigned long)data);
+        result = PyLong_FromUnsignedLong(*(unsigned long *)data);
         break;
     case T_STRING:
     {
@@ -1883,17 +1892,16 @@ Sandbox_dump(Sandbox * self, PyObject * args)
         bool eol = false;
         while (!eol)
         {
-            const char * ch = (const char *)(&data);
             size_t i = 0;
-            for (i = 0; i < sizeof(data) / sizeof(char); i++, addr++)
+            for (i = 0; i < sizeof(data); i++, addr++)
             {
-                if (ch[i] == '\0')
+                if (data[i] == '\0')
                 {
                     eol = true;
                     break;
                 }
             }
-            PyBytes_ConcatAndDel(&result, PyBytes_FromStringAndSize(ch, i));
+            PyBytes_ConcatAndDel(&result, PyBytes_FromStringAndSize(data, i));
             if ((eol) || (result == NULL))
             {
                 if ((result == NULL) && !PyErr_Occurred())
@@ -1902,20 +1910,27 @@ Sandbox_dump(Sandbox * self, PyObject * args)
                 }
                 break;
             }
-            if (!proc_dump((const void *)&proc, (const void *)addr, &data))
+            if (!proc_dump((void *)&proc, (void *)addr, sizeof(data), data))
             {
                 Py_XDECREF(result);
-                result = NULL;
-                PyErr_SetString(PyExc_RuntimeError, MSG_DUMP_DUMP_FAILED);
+                if ((errno == EIO) || (errno == EFAULT))
+                {
+                    PyErr_SetString(PyExc_ValueError, MSG_DUMP_INVALID);
+                }
+                else
+                {
+                    PyErr_SetString(PyExc_RuntimeError, MSG_DUMP_FAILED);
+                }
+                result = Py_NULL;
                 break;
             }
         }
         break;
     }
     default:
-        PyErr_SetString(PyExc_ValueError, MSG_ARGS_INVALID);
-        result = Py_None;
-        Py_INCREF(Py_None);
+        /* Raise TypeError in case of wrong typeid */
+        PyErr_SetString(PyExc_TypeError, MSG_DUMP_TYPE_ERR);
+        result = Py_NULL;
         break;
     }
     

@@ -84,16 +84,23 @@ program until the sandboxed program is finished (or terminated).
 
     def dump(self, typeid, address):
         """Copy the memory block starting from the specificed address of
-the sandboxed program's memory space, and build an object from the
-obtained data. Possble typeid's and corresponding return types
-are listed as follows,
+the sandboxed program's memory space. On success, return an object
+built from the obtained data. Possble typeid's and corresponding
+return types are as follows,
 
   - T_CHAR, T_BYTE, T_UBYTE: int
   - T_SHORT, T_USHORT, T_INT, T_UINT, T_LONG, T_ULONG: int
   - T_FLOAT, T_DOUBLE: float
   - T_STRING: str
+
+On failure, return None in case the specified address is invalid
+for dump, otherwise raise an exception.
 """
-        return super(Sandbox, self).dump(typeid, address)
+        try:
+            return super(Sandbox, self).dump(typeid, address)
+        except ValueError:
+            return None
+        pass
 
     def probe(self, compatible=True):
         """Return a dictionary containing runtime statistics of the sandboxed

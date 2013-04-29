@@ -1,3 +1,9 @@
+[2013/04/30] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox.c fallback to hybrid profiling the full asynchronous profiling
+    introduced in 0.3.5-2 may fail to update the resource usage of some very
+    short tasks leaving some statistics zero.
+  * in platform.c improved trace_kill() to overcome syscall overrun
+
 [2013/04/12] LIU Yu, <pineapple.liu@gmail.com>
   * moved macro RVAL_{IF,ELSE,FI} from platform.h to internal.h
   * in platform.{h,c} improved proc_dump() to handle some marginal conditions

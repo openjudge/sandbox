@@ -1,0 +1,21 @@
+#include <errno.h>
+#include <stdio.h>
+#include <string.h>
+#include <sysexits.h>
+
+int main(int argc, char * argv[])
+{
+    char * v = "Hello World!\n";
+    FILE * fp = fopen(@FN@, "wb");
+    if (fp == NULL)
+    {
+        return errno;
+    }
+    size_t n = fwrite((void *)v, strlen(v), 1, fp);
+    if (n != 1)
+    {
+        return errno;
+    }
+    fclose(fp);
+    return (errno == ENOTTY) ? 0 : errno;
+}

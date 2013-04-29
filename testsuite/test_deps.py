@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 ################################################################################
 # The Sandbox Libraries (Python) Test Suite 0 (Dependencies)                   #
 #                                                                              #
@@ -33,9 +32,14 @@
 ################################################################################
 #
 
-__all__ = ['TestPlatformToolChain', 'TestPackageIntegrity', ]
+__all__ = ['TestPlatformToolChain', 'TestPackageIntegrity', 'TestBadPolicy', ]
 
-import unittest
+try:
+    from . import config
+    from .config import unittest
+except (ValueError, ImportError):
+    import config
+    from config import unittest
 
 
 class TestPlatformToolChain(unittest.TestCase):
@@ -50,6 +54,12 @@ class TestPlatformToolChain(unittest.TestCase):
         pass
 
     def test_toolchain(self):
+        from subprocess import Popen, PIPE
+        cmd = config.build("hello", config.CODE_HELLO_WORLD)
+        self.assertTrue(cmd is not None)
+        p = Popen(cmd, close_fds=True, stdout=PIPE)
+        stdout, stderr = p.communicate()
+        self.assertEqual(stdout, b"Hello World!\n")
         pass
 
     pass
@@ -66,7 +76,7 @@ class TestPackageIntegrity(unittest.TestCase):
         self.assertTrue(isinstance(sandbox.Sandbox, object))
         pass
 
-    def test_policy_alloc(self):
+    def test_policy(self):
         import sandbox
         e = sandbox.SandboxEvent(sandbox.S_EVENT_EXIT)
         self.assertTrue(hasattr(e, 'type'))
@@ -80,14 +90,29 @@ class TestPackageIntegrity(unittest.TestCase):
         self.assertEqual(p(e, a).type, sandbox.S_ACTION_FINI)
         pass
 
-    def test_sandbox_alloc_err(self):
+    def test_policy_local(self):
         import sandbox
-        self.assertRaises(ValueError, sandbox.Sandbox, "/non/existence")
+        try:
+            from . import policy
+        except (ValueError, ImportError):
+            try:
+                import policy
+            except:
+                policy = None
+            pass
+        self.assertTrue(hasattr(policy, "MinimalPolicy"))
+        self.assertTrue(issubclass(policy.MinimalPolicy, sandbox.SandboxPolicy))
+        p = policy.MinimalPolicy()
+        self.assertTrue(callable(p))
+        e = sandbox.SandboxEvent(sandbox.S_EVENT_EXIT)
+        a = sandbox.SandboxAction(sandbox.S_ACTION_CONT)
+        self.assertTrue(isinstance(p(e, a), sandbox.SandboxAction))
+        self.assertEqual(p(e, a).type, sandbox.S_ACTION_FINI)
         pass
 
-    def test_sandbox_alloc(self):
+    def test_sandbox(self):
         import sandbox
-        echo = ("/bin/echo", "Hello", "World", )
+        echo = ("/bin/echo", "Hello", "World!", )
         s = sandbox.Sandbox(echo)
         self.assertTrue(hasattr(s, 'task'))
         self.assertEqual(s.task, echo)
@@ -105,13 +130,79 @@ class TestPackageIntegrity(unittest.TestCase):
         self.assertTrue(callable(s.probe))
         pass
 
+    def test_sandbox_err(self):
+        import sandbox
+        self.assertRaises(ValueError, sandbox.Sandbox, "/non/existence")
+        pass
+
+    pass
+
+
+class TestBadPolicy(unittest.TestCase):
+
+    def setUp(self):
+        self.task = ("/bin/echo", "Hello", "World!", )
+        pass
+
+    def test_non_policy(self):
+        # If the base class of the policy is not sandbox.SandboxPolicy,
+        # the sandbox should not pass self-test during initialization
+        import sandbox
+
+        class NonPolicy:
+
+            def __call__(self, e, a):
+                return a
+
+            pass
+
+        self.assertRaises(TypeError, sandbox.Sandbox, self.task, policy=NonPolicy())
+        s = sandbox.Sandbox(self.task)
+        self.assertRaises(TypeError, setattr, s, "policy", NonPolicy())
+        pass
+
+    def test_bad_policy(self):
+        # If the policy does not yield valid actions, the sandbox should
+        # terminate with BP
+        import sandbox
+
+        class BadPolicy(sandbox.SandboxPolicy):
+
+            def __call__(self, e, a):
+                return None
+
+            pass
+
+        s = sandbox.Sandbox(self.task, policy=BadPolicy())
+        s.run()
+        self.assertEqual(s.result, sandbox.S_RESULT_BP)
+        pass
+
+    def test_inf_policy(self):
+        # If the policy always returns CONT, the sandbox should terminate with
+        # BP after the sandboxed program has gone leaving no further events
+        import sandbox
+
+        class InfPolicy(sandbox.SandboxPolicy):
+
+            def __call__(self, e, a):
+                return a
+
+            pass
+
+        s_wr = open("/dev/null", "wb")
+        s = sandbox.Sandbox(self.task, policy=InfPolicy(), stdout=s_wr)
+        s.run()
+        s_wr.close()
+        self.assertEqual(s.result, sandbox.S_RESULT_BP)
+        pass
+
     pass
 
 
 def test_suite():
     return unittest.TestSuite([
-        unittest.TestLoader().loadTestsFromTestCase(TestPlatformToolChain),
-        unittest.TestLoader().loadTestsFromTestCase(TestPackageIntegrity), ])
+        unittest.TestLoader().loadTestsFromTestCase(eval(c)) for c in __all__])
 
 if __name__ == '__main__':
     unittest.main(defaultTest='test_suite')

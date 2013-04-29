@@ -47,8 +47,9 @@
 #include <stdlib.h>             /* malloc(), free() */
 #include <string.h>             /* memset(), strsep() */
 #include <sys/queue.h>          /* SLIST_*() */
-#include <sys/types.h>          /* off_t */
 #include <sys/times.h>          /* struct tms, struct timeval */
+#include <sys/types.h>          /* off_t */
+#include <sys/wait.h>           /* waitpid(), WNOHANG */
 #include <unistd.h>             /* access(), lseek(), {R,F}_OK */
 
 #ifdef HAVE_PTRACE
@@ -344,12 +345,7 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
     /* Inspect current instruction */
     if (opt & PROBE_OP)
     {
-#ifdef __x86_64__
-        unsigned long addr = pproc->regs.rip;
-#else /* __i386__ */
-        unsigned long addr = pproc->regs.eip;
-#endif /* __x86_64__ */
-
+        unsigned long addr = pproc->regs.NIP;
         if (!pproc->tflags.single_step)
         {
             addr -= 2; /* backoff 2 bytes in system call tracing mode */
@@ -438,7 +434,7 @@ proc_abi(proc_t * const pproc)
     /* In system call tracing mode, the process may somehow stop at the 
      * entrance of __kernel_vsyscall (i.e. JMP <__kernel_vsyscall+3>), 
      * rather than at the actual system call instruction (e.g. SYSENTER).
-     * I observed this issue when running static ELF-i386 programs on 
+     * We observed this issue when running static ELF-i386 programs on 
      * kernel-2.6.32-220.7.1.el6.x86_64. Perhaps a bug in the way the Linux 
      * kernel handles ptrace(). As a workaround, we can follow the JMP, and
      * try to locate the actual syscall instruction. In its current status,
@@ -467,13 +463,26 @@ proc_abi(proc_t * const pproc)
         break;
     }
     
+    /* The dump may fail on some ELF-i386 programs SIGKILLed during syscall.
+     * We have only observed this very rare failure when inspecting ELF-i386
+     * programs on a x86_64 platform running 2.6 kernel. Seems like the JMP
+     * lead us to some mythical place that is not observable. Could it be that
+     * the vsyscall page in just got unmapped upon SIGKILL? Good news is that,
+     * as far as we have observed, such failures are unique to 2.6 kernels. */
+    
     if (!proc_dump(pproc, (void *)addr, sizeof(code), code.byte))
     {
-        FUNC_RET("%d", SCMODE_MAX);
+        /* Fallback to the straightforward __trace() and see if we got luck */
+        if (__trace(T_OPTION_GETDATA, (proc_t *)pproc, (void *)addr,
+                    (long *)&code.data) != 0)
+        {
+            WARN("failed to dump vsyscall page for inspection");
+            FUNC_RET("%d", SCMODE_MAX);
+        }
     }
     
-    /* code now contains the initial instructions from the vsyscall entry.
-     * We assume no further jmp's before reaching the real syscall instruction,
+    /* The code now contains the initial instructions from the vsyscall entry.
+     * We assume no further JMP's before reaching the real syscall instruction,
      * otherwise, we will have to implement a full x86_64 disassembler :-( */
     size_t offset;
     for (offset = 0; offset < sizeof(long) - 1; offset++)
@@ -482,11 +491,14 @@ proc_abi(proc_t * const pproc)
             (OPCODE16(code.data) == OP_SYSENTER) || \
             (OPCODE16(code.data) == OP_SYSCALL))
         {
-            /* write the correct rip and op back to the process stat buffer */
+            /* patch rip and refill opcode in the process stat buffer */
             addr += offset;
             if (!proc_dump(pproc, (void *)addr, sizeof(code), code.byte))
             {
-                FUNC_RET("%d", SCMODE_MAX);
+                /* This is not a failure since we have aleady obtained a piece
+                 * of vsyscall implementation in code, just that pproc->op may
+                 * contain zero paddings introduced during the inspection */
+                WARN("failed to dump vsyscall page for opcode refill");
             }
             pproc->regs.rip = addr;
             pproc->op = code.data;
@@ -668,12 +680,66 @@ trace_next(proc_t * const pproc, trace_type_t type)
 }
 
 bool
-trace_kill(proc_t * const pproc, int signo)
+trace_kill(const proc_t * const pproc, int signo)
 {
     FUNC_BEGIN("%p,%d", pproc, signo);
     assert(pproc);
     
-    bool res = (kill(-(pproc->pid), signo) == 0);
+    /* Temporary variables */
+    pid_t pid = pproc->pid;
+    
+    /* When the prisoner process is to be killed with SIGKILL, we flush the
+     * pending opcode with a sequence of NOP. If there is pending syscall, we
+     * also replace the syscall number with SYS_pause. These precautions are
+     * essential for certain kernel versions where a killed program has chance
+     * to overrun for a few instructions. Otherwise, there is probability that
+     * the overrun may lead to undesired side effects or even security risk. */
+
+    /* We only flush opcode when signo is SIGKILL. This is because the prisoner
+     * process may continue to execute after handling (or ignoring) a blockable
+     * signal. It only makes sense to flush the opcode if the prisoner process
+     * is guaranteed to die immediately. */
+    
+    if (signo == SIGKILL)
+    {
+        /* Make a local copy of the proc stat buffer */
+        proc_t proc = {0};
+        memcpy(&proc, pproc, sizeof(proc_t));
+        if (!proc_probe(pid, PROBE_REGS | PROBE_OP, &proc))
+        {
+            WARN("failed to probe process: %d", pid);
+            goto skip_rewrite;
+        }
+        
+        /* Flush pending opcode with a sequence of NOP. */
+        unsigned long addr = proc.regs.NIP;
+        unsigned long nop = 0;
+        memset((void *)&nop, OP_NOP, sizeof(unsigned long));
+        __trace(T_OPTION_SETDATA, &proc, (void *)addr, (long *)&nop);
+        
+        /* Replace the pending system call with SYS_pause */
+        if (IS_SYSCALL(&proc))
+        {
+            if (proc.tflags.single_step)
+            {
+                proc.regs.NAX = SYS_pause;
+            }
+            else
+            {
+                proc.regs.ORIG_NAX = SYS_pause;
+            }
+#ifdef __x86_64__
+            proc.regs.cs = 0x33;
+#else /* __i386__ */
+            proc.regs.xcs = 0x23;
+#endif /* __x86_64__ */
+            __trace(T_OPTION_SETREGS, &proc, NULL, NULL);
+        }
+skip_rewrite:
+        ;
+    }
+    
+    bool res = (kill(-pid, signo) == 0);
     
     FUNC_RET("%d", res);
 }
@@ -685,6 +751,12 @@ trace_end(const proc_t * const pproc)
     assert(pproc);
     
     bool res = (__trace(T_OPTION_END, (proc_t *)pproc, NULL, NULL) == 0);
+    
+    /* Discard zombie children */
+    while (waitpid(-pproc->pid, NULL, WNOHANG) >= 0)
+    {
+        ;
+    }
     
     FUNC_RET("%d", res);
 }

@@ -1,0 +1,10 @@
+#include <signal.h>
+#include <stdio.h>
+#include <unistd.h>
+
+int main()
+{
+    int ppid = getppid();
+    kill(ppid, @SIG@);
+    return 0;
+}

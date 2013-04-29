@@ -149,7 +149,7 @@ int16_t sc2idx(syscall_t scinfo)
 #endif /* __x86_64__ */
 }
 
-/* tag syscall number with 32bit abi mask */
+/* tag syscall number with linux32 abi mask */
 int16_t abi32(int scno)
 {
     assert((scno >= 0) && (scno < 1024));
@@ -212,13 +212,13 @@ void policy(const policy_t* pp, const event_t* pe, action_t* pa)
 
 action_t* _CONT(const sandbox_t* psbox, const event_t* pe, action_t* pa)
 {
-    *pa = (action_t){S_ACTION_CONT};
+    *pa = (action_t){S_ACTION_CONT}; /* continue */
     return pa;
 }
 
 action_t* _KILL_RF(const sandbox_t* psbox, const event_t* pe, action_t* pa)
 {
-    *pa = (action_t){S_ACTION_KILL, {{S_RESULT_RF}}};
+    *pa = (action_t){S_ACTION_KILL, {{S_RESULT_RF}}}; /* restricted func. */
     return pa;
 }
 

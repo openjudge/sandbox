@@ -161,6 +161,7 @@ static int  __sandbox_task_execute(task_t *);
 static void __sandbox_task_fini(task_t *);
 
 static void __sandbox_stat_init(stat_t *);
+static void __sandbox_stat_update(sandbox_t *, const proc_t *);
 static void __sandbox_stat_fini(stat_t *);
 
 static void __sandbox_ctrl_init(ctrl_t *, thread_func_t);
@@ -771,6 +772,116 @@ __sandbox_stat_init(stat_t * pstat)
 }
 
 static void 
+__sandbox_stat_update(sandbox_t * psbox, const proc_t * pproc)
+{
+    PROC_BEGIN("%p,%p", psbox, pproc);
+    assert(psbox && pproc);
+    
+    const struct timespec ZERO = {0, 0};
+    struct timespec ts = ZERO;
+    bool exceeded = false;
+    
+    LOCK(psbox, EX);
+    
+    /* mem_info */
+    #define MEM_UPDATE(a,b) \
+    {{{ \
+        (a) = (b); \
+        (a ## _peak) = (((a ## _peak) > (a)) ? (a ## _peak) : (a)); \
+    }}} /* MEM_UPDATE */
+    
+    MEM_UPDATE(psbox->stat.mem_info.vsize, pproc->vsize);
+    MEM_UPDATE(psbox->stat.mem_info.rss, pproc->rss * getpagesize());
+    psbox->stat.mem_info.minflt = pproc->minflt;
+    psbox->stat.mem_info.majflt = pproc->majflt;
+    
+    /* cpu_info */
+    ts = ZERO;
+    TS_INPLACE_ADD(ts, pproc->utime);
+    TS_INPLACE_ADD(ts, pproc->stime);
+    TS_UPDATE(psbox->stat.cpu_info.clock, ts);
+    TS_UPDATE(psbox->stat.cpu_info.utime, pproc->utime);
+    TS_UPDATE(psbox->stat.cpu_info.stime, pproc->stime);
+    
+    /* wallclock */
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+    {
+        UNLOCK(psbox);
+        MONITOR_ERROR(psbox, "failed to get wallclock time");
+        PROC_END();
+    }
+    
+    /* Update the elapsed time stat of sandbox, also update the walllock
+     * started time if it is not set already. */
+    if (!TS_LESS(ZERO, psbox->stat.started))
+    {
+        psbox->stat.started = ts;
+        psbox->stat.elapsed = ZERO;
+    }
+    else
+    {
+        TS_INPLACE_SUB(ts, psbox->stat.started);
+        TS_UPDATE(psbox->stat.elapsed, ts);
+    }
+    
+    UNLOCK(psbox);
+    
+    /* Compare peak memory usage against memory quota limit */
+    LOCK(psbox, SH);
+    if (psbox->stat.mem_info.vsize_peak > \
+        psbox->task.quota[S_QUOTA_MEMORY])
+    {
+        DBUG("memory quota exceeded");
+        UNLOCK(psbox);
+        POST_EVENT(psbox, _QUOTA, S_QUOTA_MEMORY);
+        exceeded = true;
+    }
+    else
+    {
+        UNLOCK(psbox);
+    }
+    
+    /* Compare cpu clock time against cpu quota limit */
+    LOCK(psbox, SH);
+    if ((res_t)ts2ms(psbox->stat.cpu_info.clock) > \
+        psbox->task.quota[S_QUOTA_CPU])
+    {
+        DBUG("cpu quota exceeded");
+        UNLOCK(psbox);
+        POST_EVENT(psbox, _QUOTA, S_QUOTA_CPU);
+        exceeded = true;
+    }
+    else
+    {
+        UNLOCK(psbox);
+    }
+    
+    /* Compare elapsed time against wallclock quota limit */
+    LOCK(psbox, SH);
+    if ((res_t)ts2ms(psbox->stat.elapsed) > 
+        psbox->task.quota[S_QUOTA_WALLCLOCK])
+    {
+        DBUG("wallclock quota exceeded");
+        UNLOCK(psbox);
+        POST_EVENT(psbox, _QUOTA, S_QUOTA_WALLCLOCK);
+        exceeded = true;
+    }
+    else
+    {
+        UNLOCK(psbox);
+    }
+    
+    /* Stop targeted program to force event handling */
+    if (exceeded)
+    {
+        trace_kill(pproc, SIGSTOP);
+        trace_kill(pproc, SIGCONT);
+    }
+    
+    PROC_END();
+}
+
+static void 
 __sandbox_stat_fini(stat_t * pstat)
 {
     PROC_BEGIN("%p", pstat);
@@ -888,7 +999,7 @@ sandbox_watcher(sandbox_t * psbox)
             case SIGPROF:       /* profile timer expired */
                 if (proc.siginfo.si_code == SI_USER)
                 {
-                    goto unknown_signal;
+                    goto report_signal;
                 }
                 POST_EVENT(psbox, _QUOTA, S_QUOTA_CPU);
                 break;
@@ -902,6 +1013,7 @@ sandbox_watcher(sandbox_t * psbox)
                  * "mm/filemap.c/generic_write_checks()", and I'm preparing to 
                  * submit a trivial patch to the mailing list). 2011/12/05. */
                 POST_EVENT(psbox, _QUOTA, S_QUOTA_DISK);
+                goto update_signal;
                 break;
             case SIGTRAP:
                 /* Collect additional info of the prisoner process */
@@ -945,7 +1057,7 @@ sandbox_watcher(sandbox_t * psbox)
                 {
                     if (NOT_WAIT_EXECVE(&proc))
                     {
-                        goto unknown_signal;
+                        goto report_signal;
                     }
                     DBUG("detected: post-execve SIGTRAP");
                 }
@@ -960,7 +1072,7 @@ sandbox_watcher(sandbox_t * psbox)
 #endif /* WITH_SOFTWARE_TSC */
                 break;
             default:            /* Other runtime errors */
-                goto unknown_signal;
+                goto report_signal;
             }
         } /* trapped */
         else if ((w_info.si_code == CLD_STOPPED) || \
@@ -968,12 +1080,13 @@ sandbox_watcher(sandbox_t * psbox)
                  (w_info.si_code == CLD_DUMPED))
         {
             DBUG("wait: signaled (%d)", w_info.si_status);
-    unknown_signal:
+    report_signal:
+            POST_EVENT(psbox, _SIGNAL, w_info.si_status, proc.siginfo.si_code);
+    update_signal:
             LOCK(psbox, EX);
             psbox->stat.signal.signo = w_info.si_status;
             psbox->stat.signal.code = proc.siginfo.si_code;
             UNLOCK(psbox);
-            POST_EVENT(psbox, _SIGNAL, w_info.si_status, proc.siginfo.si_code);
         }
         else if (w_info.si_code == CLD_EXITED)
         {
@@ -989,8 +1102,9 @@ sandbox_watcher(sandbox_t * psbox)
             /* unknown event, should not reach here! */
         }
         
-        /* Notify the profiler thread to collect and examine stat */
-        pthread_kill(profiler_thread, SIGSTAT);
+        /* Update resource usage statistics. */
+        __sandbox_stat_update(psbox, &proc);
+        pthread_kill(profiler_thread, SIGPROF);
         
         /* Deliver pending events to the policy module for investigation */
         LOCK(psbox, SH);
@@ -1206,17 +1320,6 @@ sandbox_profiler(sandbox_t * psbox)
         MONITOR_END(psbox);
     }
     
-    /* Obtain the wallclock start time of the prisoner process */
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
-    {
-        MONITOR_ERROR(psbox, "failed to get wallclock start time");
-        MONITOR_END(psbox);
-    }
-    
-    LOCK(psbox, EX);
-    psbox->stat.started = ts;
-    UNLOCK(psbox);
-    
     /* Wait until the watcher thread has seen the initial SIGTRAP, and that the
      * prisoner process has mapped in the executable through execve(). This is
      * essential for correct memory profiling, because in between fork() and
@@ -1256,82 +1359,9 @@ sandbox_profiler(sandbox_t * psbox)
                 break;
             }
             
-            /* mem_info */
-            LOCK(psbox, EX);
+            /* Update resource usage statistics. */
+            __sandbox_stat_update(psbox, &proc);
             
-            #define MEM_UPDATE(a,b) \
-            {{{ \
-                (a) = (b); \
-                (a ## _peak) = (((a ## _peak) > (a)) ? (a ## _peak) : (a)); \
-            }}} /* MEM_UPDATE */
-            
-            MEM_UPDATE(psbox->stat.mem_info.vsize, proc.vsize);
-            MEM_UPDATE(psbox->stat.mem_info.rss, proc.rss * getpagesize());
-            psbox->stat.mem_info.minflt = proc.minflt;
-            psbox->stat.mem_info.majflt = proc.majflt;
-            
-            /* Compare memory usage against quota limit, raise out-of-quota 
-             * (memory) event when necessary. */
-            if (psbox->stat.mem_info.vsize_peak > \
-                psbox->task.quota[S_QUOTA_MEMORY])
-            {
-                DBUG("memory quota exceeded");
-                UNLOCK(psbox);
-                POST_EVENT(psbox, _QUOTA, S_QUOTA_MEMORY);
-                trace_kill(&proc, SIGSTOP);
-                trace_kill(&proc, SIGCONT);
-            }
-            else
-            {
-                UNLOCK(psbox);
-            }
-            
-            /* cpu_info */
-            LOCK(psbox, EX);
-            
-            #define CPU_UPDATE(a,x) \
-            {{{ \
-                ((a).tv_sec) = ((((x).tv_sec) > ((a).tv_sec)) ? \
-                                ((x).tv_sec) : ((a).tv_sec)); \
-                ((a).tv_nsec) = (((((x).tv_sec) > ((a).tv_sec)) || \
-                                  (((((x).tv_sec) == ((a).tv_sec))) && \
-                                   ((((x).tv_nsec) > ((a).tv_nsec))))) ? \
-                                 ((x).tv_nsec) : ((a).tv_nsec)); \
-            }}} /* CPU_UPDATE */
-            
-            CPU_UPDATE(psbox->stat.cpu_info.utime, proc.utime);
-            CPU_UPDATE(psbox->stat.cpu_info.stime, proc.stime);
-            
-            UNLOCK(psbox);
-            
-            /* Update the elapsed time stat of sandbox, raise out-of-quota
-             * (wallclock) event when occured. */
-            if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
-            {
-                MONITOR_ERROR(psbox, "failed to get wallclock elapsed time");
-                break;
-            }
-            
-            LOCK(psbox, EX);
-            
-            TS_INPLACE_SUB(ts, psbox->stat.started);
-            psbox->stat.elapsed = ts;
-            
-            /* Compare elapsed time against quota limit, raise out-of-quota 
-             * (wallclock) event when necessary. */
-            if ((res_t)ts2ms(psbox->stat.elapsed) > 
-                psbox->task.quota[S_QUOTA_WALLCLOCK])
-            {
-                DBUG("wallclock quota exceeded");
-                UNLOCK(psbox);
-                POST_EVENT(psbox, _QUOTA, S_QUOTA_WALLCLOCK);
-                trace_kill(&proc, SIGSTOP);
-                trace_kill(&proc, SIGCONT);
-            }
-            else
-            {
-                UNLOCK(psbox);
-            }
             /* NOTE: do NOT break here, proceed to cpu clock profiling */
         case SIGPROF:
             /* Sample the cpu clock time of the prisoner process */
@@ -1344,8 +1374,10 @@ sandbox_profiler(sandbox_t * psbox)
             }
             /* Update sandbox stat with the sampled data */
             LOCK(psbox, EX);
-            psbox->stat.cpu_info.clock = ts;
-            if ((res_t)ts2ms(ts) > psbox->task.quota[S_QUOTA_CPU])
+            TS_UPDATE(psbox->stat.cpu_info.clock, ts);
+            RELOCK(psbox, SH);
+            if ((res_t)ts2ms(psbox->stat.cpu_info.clock) >
+                psbox->task.quota[S_QUOTA_CPU])
             {
                 DBUG("cpu quota exceeded");
                 UNLOCK(psbox);

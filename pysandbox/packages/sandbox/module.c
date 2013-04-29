@@ -1700,13 +1700,17 @@ Sandbox_probe(Sandbox * self)
         Sandbox_GET_SBOX(self).stat.mem_info.majflt));
     Py_DECREF(o);
     
-    syscall_t sc = *(syscall_t *)&Sandbox_GET_SBOX(self).stat.syscall;
+    union
+    {
+        long scno;
+        syscall_t scinfo;
+    } sc = {Sandbox_GET_SBOX(self).stat.syscall};
     
     PyDict_SetItemString(result, "syscall_info", 
 #ifdef __x86_64__
-        o = Py_BuildValue("(i,i)", sc.scno, sc.mode));
+        o = Py_BuildValue("(i,i)", sc.scinfo.scno, sc.scinfo.mode));
 #else
-        o = Py_BuildValue("(i,i)", (long)sc, 0));
+        o = Py_BuildValue("(i,i)", sc.scno, 0));
 #endif /* __x86_64__ */
     Py_DECREF(o);
     
@@ -1812,7 +1816,15 @@ Sandbox_dump(Sandbox * self, PyObject * args)
     
     /* Temporary variable(s) */
     char proc[4096] = {0};      /* we don't know about proc_t internals */
-    char data[sizeof(long)] = {0};
+    union
+    {
+        long data;
+        short v_short;
+        int v_int;
+        char byte[sizeof(long)];
+        double v_double;
+        float v_float;
+    } word = {0};
     
     /* Prototypes for calling private proc_* routines in libsandbox */
     bool proc_bind(const void * const, void * const);
@@ -1829,7 +1841,7 @@ Sandbox_dump(Sandbox * self, PyObject * args)
     }
     
     /* Dump data from the prisoner process */
-    if (!proc_dump((void *)&proc, (void *)addr, sizeof(data), data))
+    if (!proc_dump((void *)&proc, (void *)addr, sizeof(word), word.byte))
     {
         /* If the dump failed due to invalid address or memory out-of-range,
          * raise ValueError, otherwise raise RuntimeError */
@@ -1849,34 +1861,34 @@ Sandbox_dump(Sandbox * self, PyObject * args)
     {
     case T_CHAR:
     case T_BYTE:
-        result = PyLong_FromLong(*(long *)data);
+        result = PyLong_FromLong((long)word.byte[0]);
         break;
     case T_UBYTE:
-        result = PyLong_FromLong((long)*(unsigned char *)data);
+        result = PyLong_FromLong((long)(unsigned char)word.byte[0]);
         break;
     case T_SHORT:
-        result = PyLong_FromLong((long)*(short *)data);
+        result = PyLong_FromLong((long)word.v_short);
         break;
     case T_USHORT:
-        result = PyLong_FromLong((long)*(unsigned short *)data);
+        result = PyLong_FromLong((long)(unsigned short)word.v_short);
         break;
     case T_FLOAT:
-        result = PyFloat_FromDouble((double)*(float *)data);
+        result = PyFloat_FromDouble((double)word.v_float);
         break;
     case T_DOUBLE:
-        result = PyFloat_FromDouble(*(double *)data);
+        result = PyFloat_FromDouble(word.v_double);
         break;
     case T_INT:
-        result = PyLong_FromLong((long)*(int *)data);
+        result = PyLong_FromLong((long)word.v_int);
         break;
     case T_UINT:
-        result = PyLong_FromUnsignedLong((unsigned long)*(unsigned int *)data);
+        result = PyLong_FromUnsignedLong((unsigned long)(unsigned int)word.v_int);
         break;
     case T_LONG:
-        result = PyLong_FromLong(*(long *)data);
+        result = PyLong_FromLong(word.data);
         break;
     case T_ULONG:
-        result = PyLong_FromUnsignedLong(*(unsigned long *)data);
+        result = PyLong_FromUnsignedLong((unsigned long)word.data);
         break;
     case T_STRING:
     {
@@ -1893,15 +1905,15 @@ Sandbox_dump(Sandbox * self, PyObject * args)
         while (!eol)
         {
             size_t i = 0;
-            for (i = 0; i < sizeof(data); i++, addr++)
+            for (i = 0; i < sizeof(word); i++, addr++)
             {
-                if (data[i] == '\0')
+                if (word.byte[i] == '\0')
                 {
                     eol = true;
                     break;
                 }
             }
-            PyBytes_ConcatAndDel(&result, PyBytes_FromStringAndSize(data, i));
+            PyBytes_ConcatAndDel(&result, PyBytes_FromStringAndSize(word.byte, i));
             if ((eol) || (result == NULL))
             {
                 if ((result == NULL) && !PyErr_Occurred())
@@ -1910,7 +1922,7 @@ Sandbox_dump(Sandbox * self, PyObject * args)
                 }
                 break;
             }
-            if (!proc_dump((void *)&proc, (void *)addr, sizeof(data), data))
+            if (!proc_dump((void *)&proc, (void *)addr, sizeof(word), word.byte))
             {
                 Py_XDECREF(result);
                 if ((errno == EIO) || (errno == EFAULT))

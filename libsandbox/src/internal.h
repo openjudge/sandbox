@@ -343,6 +343,22 @@ extern "C"
     RVAL_FI \
 /* TS_LESS */
 
+#define TS_UPDATE(a,x) \
+{{{ \
+    ((a).tv_sec) = RVAL_IF(((x).tv_sec) > ((a).tv_sec)) \
+                       (x).tv_sec \
+                   RVAL_ELSE \
+                       (a).tv_sec \
+                   RVAL_FI; \
+    ((a).tv_nsec) = RVAL_IF((((x).tv_sec) > ((a).tv_sec)) || \
+                            (((((x).tv_sec) == ((a).tv_sec))) && \
+                             ((((x).tv_nsec) > ((a).tv_nsec))))) \
+                        (x).tv_nsec \
+                    RVAL_ELSE \
+                        (a).tv_nsec \
+                    RVAL_FI; \
+}}} /* TS_UPDATE */
+
 #define TS_INPLACE_ADD(x,y) \
 {{{ \
     (x).tv_sec += (y).tv_sec; \

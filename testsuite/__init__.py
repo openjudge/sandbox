@@ -31,16 +31,20 @@
 # POSSIBILITY OF SUCH DAMAGE.                                                  #
 ################################################################################
 
-__all__ = []
+__all__ = ['test_suite', ]
 
-import unittest
+from . import (test_deps, test_prof, test_quota, test_restrict, test_signal, test_trace)
 
-from . import (test_deps, test_prof)
 from .test_deps import *
 from .test_prof import *
+from .test_quota import *
+from .test_restrict import *
+from .test_signal import *
+from .test_trace import *
+
+from .config import unittest
 
 
 def test_suite():
-    return unittest.TestSuite([
-        test_deps.test_suite(),
-        test_prof.test_suite()])
+    return unittest.TestSuite([pkg.test_suite() for pkg in
+        (test_deps, test_prof, test_quota, test_restrict, test_signal, test_trace)])

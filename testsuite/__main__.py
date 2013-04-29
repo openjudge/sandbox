@@ -33,9 +33,8 @@
 
 __all__ = []
 
-import unittest
-
 from . import test_suite
+from .config import unittest
 
 if __name__ == '__main__':
     unittest.main(defaultTest='test_suite')

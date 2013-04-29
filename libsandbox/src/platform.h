@@ -69,6 +69,8 @@ extern "C"
 #define OP_INT80                0x80cd
 #define OP_SYSCALL              0x050f
 #define OP_SYSENTER             0x340f
+#define OP_NOP                  0x90
+#define NIP                     rip
 #define NAX                     rax
 #define ORIG_NAX                orig_rax
 #endif /* __x86_64__ */
@@ -87,6 +89,8 @@ extern "C"
 /* OPCODE16 */
 #define OP_INT80                0x80cd
 #define OP_SYSENTER             0x340f
+#define OP_NOP                  0x90
+#define NIP                     eip
 #define NAX                     eax
 #define ORIG_NAX                orig_eax
 #endif /* __i386__ */
@@ -442,11 +446,11 @@ bool trace_next(proc_t * const pproc, trace_type_t type);
 
 /**
  * @brief Kill a traced process, prevent any overrun.
- * @param[in,out] pproc pointer to a binded process stat buffer
+ * @param[in] pproc pointer to a binded process stat buffer
  * @param[in] signal type of signal to use
  * @return true on success
  */
-bool trace_kill(proc_t * const pproc, int signal);
+bool trace_kill(const proc_t * const pproc, int signal);
 
 /**
  * @brief Terminate a traced process and quit sandbox_tracer().

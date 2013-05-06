@@ -1,0 +1,20 @@
+#include <errno.h>
+#include <stdio.h>
+#include <sysexits.h>
+
+int main(int argc, char * argv[])
+{
+    int v = 0;
+    FILE * fp = fopen(@FN@, "rb");
+    if (fp == NULL)
+    {
+        return errno;
+    }
+    size_t n = fread(&v, sizeof(v), 1, fp);
+    if (n != 1)
+    {
+        return errno;
+    }
+    fclose(fp);
+    return (errno == ENOTTY) ? 0 : errno;
+}

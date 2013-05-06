@@ -49,6 +49,11 @@ extern "C"
 {
 #endif
 
+/* Macros for composing conditional rvalue */
+#define RVAL_IF(x)              ((x) ? (
+#define RVAL_ELSE               ) : (
+#define RVAL_FI                 ))
+
 /* Macros for producing debugging messages */
 #ifndef _LOG
 #ifdef NDEBUG
@@ -173,7 +178,7 @@ extern "C"
         pthread_cond_wait(&((plock)->rdc), &((plock)->mutex)); \
     } \
 }}} 
-#endif /* __RWLOCK_READER_WAIT */  
+#endif /* __RWLOCK_READER_WAIT */
 
 #ifndef __RWLOCK_WRITER_WAIT
 #define __RWLOCK_WRITER_WAIT(plock,cond) \
@@ -324,6 +329,7 @@ extern "C"
 /* Macros for manipulating struct timespec from <time.h> */
 #define ms2ns(x) (1000000 * (x))
 #define ts2ms(x) ((((x).tv_sec) * 1000) + (((x).tv_nsec) / 1000000))
+#define fts2ms(x) ((0.000001 * ((x).tv_nsec)) + (1000.0 * ((x).tv_sec)))
 
 #define TS_LESS(x,y) \
     RVAL_IF((x).tv_sec < (y).tv_sec) \
@@ -336,6 +342,22 @@ extern "C"
         RVAL_FI \
     RVAL_FI \
 /* TS_LESS */
+
+#define TS_UPDATE(a,x) \
+{{{ \
+    ((a).tv_sec) = RVAL_IF(((x).tv_sec) > ((a).tv_sec)) \
+                       (x).tv_sec \
+                   RVAL_ELSE \
+                       (a).tv_sec \
+                   RVAL_FI; \
+    ((a).tv_nsec) = RVAL_IF((((x).tv_sec) > ((a).tv_sec)) || \
+                            (((((x).tv_sec) == ((a).tv_sec))) && \
+                             ((((x).tv_nsec) > ((a).tv_nsec))))) \
+                        (x).tv_nsec \
+                    RVAL_ELSE \
+                        (a).tv_nsec \
+                    RVAL_FI; \
+}}} /* TS_UPDATE */
 
 #define TS_INPLACE_ADD(x,y) \
 {{{ \
@@ -358,12 +380,6 @@ extern "C"
         (x).tv_nsec += ms2ns(1000); \
     } \
 }}} /* TS_INPLACE_SUB */
-
-/**
- * @brief Let the current process enter traced state.
- * @return true on success
- */
-bool trace_me(void);
 
 /**
  * @param[in] type any of the constant values defined in \c event_type_t
@@ -393,7 +409,7 @@ const char * s_result_name(int result);
  * @param[in] option any of the constant values defined in \c option_t
  * @return a statically allocated string name for the specified option.
  */
-const char * t_option_name(int option);
+const char * s_trace_opt_name(int option);
 
 #ifdef __cplusplus
 } /* extern "C" */

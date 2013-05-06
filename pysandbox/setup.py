@@ -39,7 +39,7 @@ binary programs according to configurable / programmable policies."""
 
 NAME = 'pysandbox'
 VERSION = "0.3.5"
-RELEASE = "2"
+RELEASE = "3"
 AUTHOR = "LIU Yu"
 AUTHOR_EMAIL = "pineapple.liu@gmail.com"
 MAINTAINER = AUTHOR
@@ -88,7 +88,7 @@ def patch_link_args(oldflags, static_core_lib=False):
 
 _sandbox = Extension('_sandbox',
     language='c',
-    define_macros=[('SANDBOX', None),
+    define_macros=[('SANDBOX_DEV', None),
                    ('NDEBUG', None),
                    ('AUTHOR', '"%s <%s>"' % (AUTHOR, AUTHOR_EMAIL)),
                    ('VERSION', '"%s-%s"' % (VERSION, RELEASE))],
@@ -126,6 +126,7 @@ setup(name=NAME,
           'Programming Language :: Python :: 2.7',
           'Programming Language :: Python :: 3',
           'Programming Language :: Python :: 3.2',
+          'Programming Language :: Python :: 3.3',
           'Topic :: Software Development :: Libraries',
           'Topic :: Software Development :: Quality Assurance',
           'Topic :: Software Development :: Testing',

@@ -47,8 +47,9 @@
 #include <stdlib.h>             /* malloc(), free() */
 #include <string.h>             /* memset(), strsep() */
 #include <sys/queue.h>          /* SLIST_*() */
-#include <sys/types.h>          /* off_t */
 #include <sys/times.h>          /* struct tms, struct timeval */
+#include <sys/types.h>          /* off_t */
+#include <sys/wait.h>           /* waitpid(), WNOHANG */
 #include <unistd.h>             /* access(), lseek(), {R,F}_OK */
 
 #ifdef HAVE_PTRACE
@@ -144,7 +145,7 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
         FUNC_RET("%d", false);
     }
     
-    char buffer[4096];    
+    char buffer[4096];
     sprintf(buffer, PROCFS "/%d/stat", pid);
    
     int fd = open(buffer, O_RDONLY);
@@ -344,19 +345,13 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
     /* Inspect current instruction */
     if (opt & PROBE_OP)
     {
-#ifdef __x86_64__
-        unsigned char * addr = (unsigned char *)pproc->regs.rip;
-#else /* __i386__ */
-        unsigned char * addr = (unsigned char *)pproc->regs.eip;
-#endif /* __x86_64__ */
-
+        unsigned long addr = pproc->regs.NIP;
         if (!pproc->tflags.single_step)
         {
             addr -= 2; /* backoff 2 bytes in system call tracing mode */
         }
         
-        if (__trace(T_OPTION_GETDATA, pproc, (void *)addr, 
-            (long *)&pproc->op) != 0)
+        if (!proc_dump(pproc, (void *)addr, sizeof(long), (char *)&pproc->op))
         {
             FUNC_RET("%d", false);
         }
@@ -381,7 +376,7 @@ proc_probe(pid_t pid, int opt, proc_t * const pproc)
 }
 
 int
-proc_syscall_mode(proc_t * const pproc)
+proc_abi(proc_t * const pproc)
 {
     FUNC_BEGIN("%p", pproc);
     assert(pproc);
@@ -439,22 +434,27 @@ proc_syscall_mode(proc_t * const pproc)
     /* In system call tracing mode, the process may somehow stop at the 
      * entrance of __kernel_vsyscall (i.e. JMP <__kernel_vsyscall+3>), 
      * rather than at the actual system call instruction (e.g. SYSENTER).
-     * I observed this issue when running static ELF-i386 programs on 
+     * We observed this issue when running static ELF-i386 programs on 
      * kernel-2.6.32-220.7.1.el6.x86_64. Perhaps a bug in the way the Linux 
-     * kernel handles ptrace(). As a workaround, we can follow the JMP for 
-     * a few steps to locate the actual instruction. In its current status,
-     * we have only implemented JMP REL (i.e. EB and E9) inspection. Other 
+     * kernel handles ptrace(). As a workaround, we can follow the JMP, and
+     * try to locate the actual syscall instruction. In its current status,
+     * we have only implemented JMP REL (i.e. EB and E9) decoding. Other 
      * types of JMP / CALL instructions are treated as illegal scmode. */
     
-    unsigned char * addr = (unsigned char *)pproc->regs.rip;
+    unsigned long addr = pproc->regs.rip;
+    union
+    {
+        unsigned long data;
+        char byte[sizeof(unsigned long)];
+    } code = {pproc->op};
     
-    switch (OPCODE16(pproc->op) & 0xffUL)
+    switch (OPCODE16(code.data) & 0xffUL)
     {
     case 0xeb: /* jmp rel short */
-        addr += (char)((pproc->op & 0xff00UL) >> 8);
+        addr += (char)((code.data & 0xff00UL) >> 8);
         break;
     case 0xe9: /* jmp rel */
-        addr += (int)((pproc->op & 0xffffffff00UL) >> 8);
+        addr += (int)((code.data & 0xffffffff00UL) >> 8);
         break;
     case 0xea: /* jmp far */
     case 0xff: /* call */
@@ -463,29 +463,50 @@ proc_syscall_mode(proc_t * const pproc)
         break;
     }
     
-    unsigned long code;
-    if (__trace(T_OPTION_GETDATA, pproc, addr, (long *)&code) != 0)
+    /* The dump may fail on some ELF-i386 programs SIGKILLed during syscall.
+     * We have only observed this very rare failure when inspecting ELF-i386
+     * programs on a x86_64 platform running 2.6 kernel. Seems like the JMP
+     * lead us to some mythical place that is not observable. Could it be that
+     * the vsyscall page in just got unmapped upon SIGKILL? Good news is that,
+     * as far as we have observed, such failures are unique to 2.6 kernels. */
+    
+    if (!proc_dump(pproc, (void *)addr, sizeof(code), code.byte))
     {
-        FUNC_RET("%d", SCMODE_MAX);
+        /* Fallback to the straightforward __trace() and see if we got luck */
+        if (__trace(T_OPTION_GETDATA, (proc_t *)pproc, (void *)addr,
+                    (long *)&code.data) != 0)
+        {
+            WARN("failed to dump vsyscall page for inspection");
+            FUNC_RET("%d", SCMODE_MAX);
+        }
     }
     
+    /* The code now contains the initial instructions from the vsyscall entry.
+     * We assume no further JMP's before reaching the real syscall instruction,
+     * otherwise, we will have to implement a full x86_64 disassembler :-( */
     size_t offset;
     for (offset = 0; offset < sizeof(long) - 1; offset++)
     {
-        if ((OPCODE16(code) == OP_INT80) || \
-            (OPCODE16(code) == OP_SYSENTER) || \
-            (OPCODE16(code) == OP_SYSCALL))
+        if ((OPCODE16(code.data) == OP_INT80) || \
+            (OPCODE16(code.data) == OP_SYSENTER) || \
+            (OPCODE16(code.data) == OP_SYSCALL))
         {
+            /* patch rip and refill opcode in the process stat buffer */
             addr += offset;
-            if (__trace(T_OPTION_GETDATA, pproc, addr, (long *)&pproc->op) != 0)
+            if (!proc_dump(pproc, (void *)addr, sizeof(code), code.byte))
             {
-                FUNC_RET("%d", SCMODE_MAX);
+                /* This is not a failure since we have aleady obtained a piece
+                 * of vsyscall implementation in code, just that pproc->op may
+                 * contain zero paddings introduced during the inspection */
+                WARN("failed to dump vsyscall page for opcode refill");
             }
-            DBUG("vsyscall_addr       0x%016lx", (unsigned long)addr);
-            DBUG("vsyscall_code       0x%016lx", pproc->op);
+            pproc->regs.rip = addr;
+            pproc->op = code.data;
+            DBUG("vsyscall_addr       0x%016lx", addr);
+            DBUG("vsyscall_code       0x%016lx", code.data);
             break;
         }
-        code = (code >> 8);
+        code.data = (code.data >> 8);
     }
     
 #endif /* __x86_64__ */
@@ -496,22 +517,73 @@ proc_syscall_mode(proc_t * const pproc)
 
 bool
 proc_dump(const proc_t * const pproc, const void * const addr, 
-          long * const pword)
+          size_t len, char * const buff)
 {
-    FUNC_BEGIN("%p,%p,%p", pproc, addr, pword);
-    assert(pproc && addr && pword);
+    FUNC_BEGIN("%p,%p,%zu,%p", pproc, addr, len, (void * const)buff);
+    assert(pproc && (addr || true) && (len > 0) && buff);
     
-    if ((pproc == NULL) || (addr == NULL) || (pword == NULL))
+    if ((pproc == NULL) || (addr == NULL) || (len <= 0) || (buff == NULL))
     {
+        errno = (addr == NULL) ? (EIO) : (EINVAL);
         FUNC_RET("%d", false);
     }
     
-    if (__trace(T_OPTION_GETDATA, (proc_t *)pproc, (void *)addr, pword) != 0)
-    {
-        FUNC_RET("%d", false);
-    }    
+    /* Adjust address when it is not word-aligned. Also take care of some
+     * exceptional conditions. The following method was mostly learned from
+     * the umoven() function from strace-4.4.98 (util.c) */
+    #ifndef MIN
+    #define MIN(a,b) (((a) < (b)) ? (a) : (b))
+    #endif
     
-    DBUG("data.%p     0x%016lx", addr, *pword);
+    unsigned long src = (unsigned long)addr;
+    char * dest = buff;
+    bool dumped = false;
+    
+    union
+    {
+        unsigned long data;
+        char byte[sizeof(unsigned long)];
+    } word;
+    
+    if (src & (sizeof(word) - 1))
+    {
+        ssize_t start = src - (src & -sizeof(word));
+        src &= -sizeof(word);
+        if (__trace(T_OPTION_GETDATA, (proc_t *)pproc, (void *)src, 
+                    (long *)&word.data) != 0)
+        {
+            FUNC_RET("%d", false);
+        }
+        ssize_t count = MIN(sizeof(word) - start, len);
+        memcpy(dest, &word.byte[start], count);
+        DBUG("data.%p     0x%016lx", (void *)src, word.data);
+        dumped = true;
+        src += sizeof(word);
+        dest += count;
+        len -= count;
+    }
+    
+    while (len > 0)
+    {
+        if (__trace(T_OPTION_GETDATA, (proc_t *)pproc, (void *)src, 
+                    (long *)&word.data) != 0)
+        {
+            /* Reached 'end of memory', but alreay dumped some memory blocks */
+            if (dumped && ((errno == EPERM) || (errno == EIO)))
+            {
+                errno = EFAULT;
+                FUNC_RET("%d", false);
+            }
+            FUNC_RET("%d", false);
+        }
+        ssize_t count = MIN(sizeof(word), len);
+        memcpy(dest, word.byte, count);
+        DBUG("data.%p     0x%016lx", (void *)src, word.data);
+        dumped = true;
+        src += sizeof(word);
+        dest += count;
+        len -= count;
+    }
     
 #ifdef DELETED
 #ifdef HAVE_PROCFS
@@ -533,7 +605,7 @@ proc_dump(const proc_t * const pproc, const void * const addr,
         WARN("lseek(%d, %p, SEEK_SET) failes, ERRNO %d", fd, addr, errno);
         FUNC_RET("%d", false);
     }
-    if (read(fd, (void *)pword, sizeof(unsigned long)) < 0)
+    if (read(fd, (void *)pword, sizeof(long)) < 0)
     {
         WARN("read");
         FUNC_RET("%d", false);
@@ -608,12 +680,66 @@ trace_next(proc_t * const pproc, trace_type_t type)
 }
 
 bool
-trace_kill(proc_t * const pproc, int signo)
+trace_kill(const proc_t * const pproc, int signo)
 {
     FUNC_BEGIN("%p,%d", pproc, signo);
     assert(pproc);
     
-    bool res = (kill(-(pproc->pid), signo) == 0);
+    /* Temporary variables */
+    pid_t pid = pproc->pid;
+    
+    /* When the prisoner process is to be killed with SIGKILL, we flush the
+     * pending opcode with a sequence of NOP. If there is pending syscall, we
+     * also replace the syscall number with SYS_pause. These precautions are
+     * essential for certain kernel versions where a killed program has chance
+     * to overrun for a few instructions. Otherwise, there is probability that
+     * the overrun may lead to undesired side effects or even security risk. */
+
+    /* We only flush opcode when signo is SIGKILL. This is because the prisoner
+     * process may continue to execute after handling (or ignoring) a blockable
+     * signal. It only makes sense to flush the opcode if the prisoner process
+     * is guaranteed to die immediately. */
+    
+    if (signo == SIGKILL)
+    {
+        /* Make a local copy of the proc stat buffer */
+        proc_t proc = {0};
+        memcpy(&proc, pproc, sizeof(proc_t));
+        if (!proc_probe(pid, PROBE_REGS | PROBE_OP, &proc))
+        {
+            WARN("failed to probe process: %d", pid);
+            goto skip_rewrite;
+        }
+        
+        /* Flush pending opcode with a sequence of NOP. */
+        unsigned long addr = proc.regs.NIP;
+        unsigned long nop = 0;
+        memset((void *)&nop, OP_NOP, sizeof(unsigned long));
+        __trace(T_OPTION_SETDATA, &proc, (void *)addr, (long *)&nop);
+        
+        /* Replace the pending system call with SYS_pause */
+        if (IS_SYSCALL(&proc))
+        {
+            if (proc.tflags.single_step)
+            {
+                proc.regs.NAX = SYS_pause;
+            }
+            else
+            {
+                proc.regs.ORIG_NAX = SYS_pause;
+            }
+#ifdef __x86_64__
+            proc.regs.cs = 0x33;
+#else /* __i386__ */
+            proc.regs.xcs = 0x23;
+#endif /* __x86_64__ */
+            __trace(T_OPTION_SETREGS, &proc, NULL, NULL);
+        }
+skip_rewrite:
+        ;
+    }
+    
+    bool res = (kill(-pid, signo) == 0);
     
     FUNC_RET("%d", res);
 }
@@ -625,6 +751,12 @@ trace_end(const proc_t * const pproc)
     assert(pproc);
     
     bool res = (__trace(T_OPTION_END, (proc_t *)pproc, NULL, NULL) == 0);
+    
+    /* Discard zombie children */
+    while (waitpid(-pproc->pid, NULL, WNOHANG) >= 0)
+    {
+        ;
+    }
     
     FUNC_RET("%d", res);
 }
@@ -691,7 +823,7 @@ __trace_impl(option_t option, proc_t * const pproc, void * const addr,
         {
             long temp = ptrace(PTRACE_PEEKDATA, pid, addr, NULL);
             res = errno;
-            *pdata = (res != 0)?(*pdata):(temp);
+            *pdata = (res != 0) ? (*pdata) : (temp);
         }
         break;
     case T_OPTION_SETDATA:
@@ -771,7 +903,7 @@ __trace(option_t option, proc_t * const pproc, void * const addr,
     trace_info.option = option;
     trace_info.pproc = pproc;
     trace_info.addr = addr;
-    trace_info.data = ((pdata != NULL)?(*pdata):(0));
+    trace_info.data = ((pdata != NULL) ? (*pdata) : (0));
     trace_info.result = 0;
     trace_info.errnum = errno;
     pthread_cond_broadcast(&trace_update);
@@ -779,7 +911,7 @@ __trace(option_t option, proc_t * const pproc, void * const addr,
     /* Wait while the option is being performed */
     while (trace_info.option != T_OPTION_ACK)
     {
-        DBUG("requesting trace option: %s", t_option_name(trace_info.option));
+        DBUG("requesting trace option: %s", s_trace_opt_name(trace_info.option));
         pthread_cond_wait(&trace_update, &global_mutex);
     }
     
@@ -852,7 +984,7 @@ sandbox_tracer(void * const dummy)
             continue;
         }
         
-        DBUG("received trace option: %s", t_option_name(trace_info.option));
+        DBUG("received trace option: %s", s_trace_opt_name(trace_info.option));
         
         if (trace_info.option == T_OPTION_END)
         {
@@ -868,11 +1000,11 @@ sandbox_tracer(void * const dummy)
         
         while (trace_info.option == T_OPTION_ACK)
         {
-            DBUG("sending trace option: %s", t_option_name(T_OPTION_ACK));
+            DBUG("sending trace option: %s", s_trace_opt_name(T_OPTION_ACK));
             pthread_cond_wait(&trace_update, &global_mutex);
         }
         
-        DBUG("sent trace option: %s", t_option_name(T_OPTION_ACK));
+        DBUG("sent trace option: %s", s_trace_opt_name(T_OPTION_ACK));
     }
     V(&global_mutex);
     
@@ -952,8 +1084,6 @@ sandbox_manager(sandbox_pool_t * const pool)
      * is the planned profiling cycle (cycle), PV is the measured profiling 
      * cycle (delta), and MV is the calibrated time for sleep (timeout). */
     
-    #define dbl_ts2ms(x) (0.000001 * (x).tv_nsec + 1000.0 * (x).tv_sec)
-    
     const struct timespec ZERO = {0, 0};
     
     struct timespec cycle = {0, ms2ns(1000 / PROF_FREQ)};
@@ -970,7 +1100,7 @@ sandbox_manager(sandbox_pool_t * const pool)
             cycle = eps;
         }
     }
-    DBUG("manager broadcasting at %.2lfHz", 1000. / dbl_ts2ms(cycle));
+    DBUG("manager broadcasting at %.2lfHz", 1000. / fts2ms(cycle));
     
     /* Parameters for sleep time calibration */
     const double Kp = 0.75, Ki = 0.25, Kd = 0.0;
@@ -978,7 +1108,7 @@ sandbox_manager(sandbox_pool_t * const pool)
     const struct timespec MV_MAX = cycle;
     
     DBUG("SP=%.2lf / Kp=%.2lf, Ki=%.2lf, Kd=%.2lf / MV=[%.2lf, %.2lf]", 
-        dbl_ts2ms(cycle), Kp, Ki, Kd, dbl_ts2ms(MV_MIN), dbl_ts2ms(MV_MAX));
+        fts2ms(cycle), Kp, Ki, Kd, fts2ms(MV_MIN), fts2ms(MV_MAX));
     
     struct timespec timeout = cycle;
     struct timespec t = ZERO;
@@ -1069,12 +1199,12 @@ sandbox_manager(sandbox_pool_t * const pool)
             struct timespec feedback = ZERO;
             {
                 /* Convert msec feedback to struct timespec equivalent */
-                long double _fb_msec = Kp * dbl_ts2ms(error) + 
-                    Ki * dbl_ts2ms(integral) + Kd * dbl_ts2ms(derivative);
-                long double _fb_int = 0.0;
-                long double _fb_frac = modfl(_fb_msec / 1000.0, &_fb_int);
-                feedback = (struct timespec){lrintl(_fb_int), 
-                lrintl(ms2ns(_fb_frac * 1000.0))}; 
+                long double fb_msec = Kp * fts2ms(error) + 
+                    Ki * fts2ms(integral) + Kd * fts2ms(derivative);
+                long double fb_int = 0.0;
+                long double fb_frac = modfl(fb_msec / 1000.0, &fb_int);
+                feedback = (struct timespec){lrintl(fb_int), 
+                    lrintl(ms2ns(fb_frac * 1000.0))}; 
             }
             
             timeout = cycle;
@@ -1089,8 +1219,8 @@ sandbox_manager(sandbox_pool_t * const pool)
             }
             
             DBUG("manager beacon (%06lu): PV=%.2lf / P=%.2lf, I=%.2lf, D=%.2lf"
-                " / MV=%.2lf", count, dbl_ts2ms(delta), dbl_ts2ms(error), 
-                dbl_ts2ms(integral), dbl_ts2ms(derivative), dbl_ts2ms(timeout));
+                " / MV=%.2lf", count, fts2ms(delta), fts2ms(error), 
+                fts2ms(integral), fts2ms(derivative), fts2ms(timeout));
             
             prev_error = error;
             error = ZERO;

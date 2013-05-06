@@ -1,3 +1,10 @@
+[2013/04/12] LIU Yu, <pineapple.liu@gmail.com>
+  * in sandbox/module.c revised Sandbox_dump() to suppress some aggressive 
+    exceptions when failing to dump data due to invalid address
+
+[2013/04/10] LIU Yu, <pineapple.liu@gmail.com>
+  * in setup.{py,cfg} updated version to 0.3.5-3
+
 [2013/03/24] LIU Yu, <pineapple.liu@gmail.com>
   * in setup.py added -lm to linker arguments
 

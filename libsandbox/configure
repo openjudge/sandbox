@@ -2140,7 +2140,7 @@ ac_link='$CC -o conftest$ac_exeext $CFLAGS $CPPFLAGS $LDFLAGS conftest.$ac_ext $
 ac_compiler_gnu=$ac_cv_c_compiler_gnu
 
 
-PACKAGE_RELEASE="2"
+PACKAGE_RELEASE="3"
 
 PACKAGE_BRIEF="The Sandbox Libraries"
 

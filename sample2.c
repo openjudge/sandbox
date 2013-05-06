@@ -1,7 +1,7 @@
 /*******************************************************************************
  * The Sandbox Libraries (Core) - C Sample Program                             *
  *                                                                             *
- * Copyright (C) 2012 LIU Yu, pineapple.liu@gmail.com                          *
+ * Copyright (C) 2012-2013 LIU Yu, pineapple.liu@gmail.com                     *
  * All rights reserved.                                                        *
  *                                                                             *
  * Redistribution and use in source and binary forms, with or without          *
@@ -40,11 +40,16 @@
 #define PROG_NAME "sample2"
 #endif /* PROG_NAME */
 
-#include <stdio.h>
 #include <assert.h>
+#include <sandbox.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <sysexits.h>
 #include <unistd.h>
-#include <sandbox.h>
+
+#ifndef INT16_MAX
+#define INT16_MAX (32767)
+#endif /* INT16_MAX */
 
 /* mini sandbox with embedded policy */
 typedef action_t* (*rule_t)(const sandbox_t*, const event_t*, action_t*);
@@ -52,13 +57,8 @@ typedef struct
 {
    sandbox_t sbox;
    policy_t default_policy;
-   rule_t sc_table[1024];
+   rule_t sc_table[INT16_MAX + 1];
 } minisbox_t;
-
-void policy_setup(minisbox_t*);
-
-typedef enum {P_ELAPSED = 0, P_CPU = 1, P_MEMORY = 2, } probe_t;
-res_t probe(const sandbox_t*, probe_t);
 
 /* result code translation table */
 const char* result_name[] =
@@ -66,8 +66,17 @@ const char* result_name[] =
     "PD", "OK", "RF", "ML", "OL", "TL", "RT", "AT", "IE", "BP", NULL,
 };
 
-int 
-main(int argc, const char* argv[])
+/* initialize and apply local policy rules */
+void policy_setup(minisbox_t*);
+
+typedef enum
+{
+    P_ELAPSED = 0, P_CPU = 1, P_MEMORY = 2,
+} probe_t;
+
+res_t probe(const sandbox_t*, probe_t);
+
+int main(int argc, const char* argv[])
 {
     if (argc < 2)
     {
@@ -105,15 +114,13 @@ main(int argc, const char* argv[])
     return EX_OK;
 }
 
-/* struct timespec to msec conversion */
-static unsigned long
-ts2ms(struct timespec ts)
+/* convert struct timespec to msec equivalent */
+unsigned long ts2ms(struct timespec ts)
 {
     return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
-res_t 
-probe(const sandbox_t* psbox, probe_t key)
+res_t probe(const sandbox_t* psbox, probe_t key)
 {
     switch (key)
     {
@@ -129,43 +136,66 @@ probe(const sandbox_t* psbox, probe_t key)
     return 0;
 }
 
-static void policy(const policy_t*, const event_t*, action_t*);
-static action_t* _KILL_RF(const sandbox_t*, const event_t*, action_t*);
-static action_t* _CONT(const sandbox_t*, const event_t*, action_t*);
-
-/* white list of essential linux syscalls for statically-linked C programs */
-const int sc_safe[] =
+/* convert syscall_t to 15bit sc_table index */
+int16_t sc2idx(syscall_t scinfo)
 {
 #ifdef __x86_64__
-    0, 1, 5, 8, 9, 10, 11, 12, 16, 25, 63, 158, 219, 231, 
+    assert((scinfo.scno >= 0) && (scinfo.scno < 1024) && 
+        (scinfo.mode >= 0) && (scinfo.mode < 32));
+    return (int16_t)(scinfo.scno | (scinfo.mode << 10));
 #else /* __i386__ */
-    0, 3, 4, 19, 45, 54, 90, 91, 122, 125, 140, 163, 192, 197, 224, 243, 252, 
+    assert((scinfo >= 0) && (scinfo < 1024));
+    return (int16_t)(scinfo);
 #endif /* __x86_64__ */
-   -1, /* sentinel */
-};
+}
 
-void
-policy_setup(minisbox_t* pmsb)
+/* tag syscall number with linux32 abi mask */
+int16_t abi32(int scno)
+{
+    assert((scno >= 0) && (scno < 1024));
+#ifdef __x86_64__
+    return (int16_t)(scno | (1 << 10));
+#else /* __i386__ */
+    return (int16_t)(scno);
+#endif /* __x86_64__ */
+}
+
+void policy(const policy_t*, const event_t*, action_t*);
+action_t* _KILL_RF(const sandbox_t*, const event_t*, action_t*);
+action_t* _CONT(const sandbox_t*, const event_t*, action_t*);
+
+void policy_setup(minisbox_t* pmsb)
 {
     assert(pmsb);
+    /* white list of essential linux syscalls for statically-linked C programs */
+    const int16_t sc_safe[] =
+    {
+        abi32(0), abi32(3), abi32(4), abi32(19), abi32(45), abi32(54), 
+        abi32(90), abi32(91), abi32(122), abi32(125), abi32(140), abi32(163),
+        abi32(192), abi32(197), abi32(224), abi32(243), abi32(252), 
+#ifdef __x86_64__
+        0, 1, 5, 8, 9, 10, 11, 12, 16, 25, 63, 158, 219, 231, 
+#endif /* __x86_64__ */
+        -1, /* sentinel */
+    };
     /* initialize table of system call rules */
-    size_t scno, i = 0;
-    for (scno = 0; scno < sizeof(pmsb->sc_table) / sizeof(rule_t); scno++)
+    int sc, i = 0;
+    for (sc = 0; sc <= INT16_MAX; sc++)
     {
-        pmsb->sc_table[scno] = _KILL_RF;
+        pmsb->sc_table[sc] = _KILL_RF;
     }
-    while (sc_safe[i] >= 0)
+    while ((sc = sc_safe[i++]) >= 0)
     {
-        pmsb->sc_table[sc_safe[i++]] = _CONT;
+        pmsb->sc_table[sc] = _CONT;
     }
+    /* override the default policy of the sandbox */
     pmsb->default_policy = pmsb->sbox.ctrl.policy;
     pmsb->default_policy.entry = (pmsb->default_policy.entry) ?: \
         (void*)sandbox_default_policy;
     pmsb->sbox.ctrl.policy = (policy_t){(void*)policy, (long)pmsb};
 }
 
-static void
-policy(const policy_t* pp, const event_t* pe, action_t* pa)
+void policy(const policy_t* pp, const event_t* pe, action_t* pa)
 {
     assert(pp && pe && pa);
     const minisbox_t* pmsb = (const minisbox_t*)pp->data;
@@ -173,33 +203,22 @@ policy(const policy_t* pp, const event_t* pe, action_t* pa)
     if ((pe->type == S_EVENT_SYSCALL) || (pe->type == S_EVENT_SYSRET))
     {
         const syscall_t scinfo = *(const syscall_t*)&(pe->data._SYSCALL.scinfo);
-#ifdef __x86_64__
-        if (scinfo.mode != 0)
-        {
-            _KILL_RF(&pmsb->sbox, pe, pa);
-            return;
-        }
-        pmsb->sc_table[scinfo.scno](&pmsb->sbox, pe, pa);
-#else /* __i386__ */
-        pmsb->sc_table[scinfo](&pmsb->sbox, pe, pa);
-#endif /* __x86_64__ */
+        pmsb->sc_table[sc2idx(scinfo)](&pmsb->sbox, pe, pa);
         return;
     }
     /* bypass other events to the default poicy */
     ((policy_entry_t)pmsb->default_policy.entry)(&pmsb->default_policy, pe, pa);
 }
 
-static action_t*
-_CONT(const sandbox_t* psbox, const event_t* pe, action_t* pa)
+action_t* _CONT(const sandbox_t* psbox, const event_t* pe, action_t* pa)
 {
-    *pa = (action_t){S_ACTION_CONT};
+    *pa = (action_t){S_ACTION_CONT}; /* continue */
     return pa;
 }
 
-static action_t*
-_KILL_RF(const sandbox_t* psbox, const event_t* pe, action_t* pa)
+action_t* _KILL_RF(const sandbox_t* psbox, const event_t* pe, action_t* pa)
 {
-    *pa = (action_t){S_ACTION_KILL, {{S_RESULT_RF}}};
+    *pa = (action_t){S_ACTION_KILL, {{S_RESULT_RF}}}; /* restricted func. */
     return pa;
 }
 

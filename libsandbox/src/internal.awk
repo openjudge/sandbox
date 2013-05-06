@@ -75,7 +75,7 @@ BEGIN {
     print ""
     
     nevent = 0
-    ievent = 0;    
+    ievent = 0;
     naction = 0;
     iaction = 0;
     nstatus = 0;
@@ -189,7 +189,7 @@ END {
     print ""
 
     print "const char *"
-    print "t_option_name(int option)"
+    print "s_trace_opt_name(int option)"
     print "{"
     print "    static const char * table[] = "
     print "    {"

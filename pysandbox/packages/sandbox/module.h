@@ -193,7 +193,9 @@ typedef struct
 
 #define MSG_DUMP_NOT_BLOCKED    "cannot dump a sandbox unless it is blocked"
 #define MSG_DUMP_PROBE_FAILED   "failed to probe the sandbox"
-#define MSG_DUMP_DUMP_FAILED    "failed to dump the sandbox"
+#define MSG_DUMP_TYPE_ERR       "typid is invalid for dump"
+#define MSG_DUMP_INVALID        "address is invalid for dump"
+#define MSG_DUMP_FAILED         "failed to dump the sandbox"
 
 
 #ifdef __cplusplus

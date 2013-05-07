@@ -44,11 +44,11 @@ INSTALLATION
 
 SPECIAL NOTICES
   
-  1. libsandbox is designed for, and has been tested on, linux-2.6 (CentOS 6.2,
-     Ubuntu 11.4) and linux-3.0 (Ubuntu 11.10, Ubuntu 12.10) systems on i686 
-     and x86_64 architectures (x86_64 supported since v0.3.x). The behaviours 
-     of libsandbox on other platforms are undefined, even if, though unlikely, 
-     they pass configuration and (or) compilation;
+  1. libsandbox is designed for, and has been tested on, Linux 2.6 (CentOS 6.2 
+     -6.4), 3.0 (Ubuntu 11.10), and 3.2 (Ubuntu 12.04 LTS) systems on i686 and 
+     x86_64 architectures (x86_64 supported since v0.3.x). The behaviours of 
+     libsandbox on other platforms are undefined, even if -- though unlikely --
+     they can pass configuration and (or) compilation;
   2. As of v0.3.5, libsandbox only supports single process ELF programs. If the
      user-provided policy module bypasses system calls that spawn new processes
      (i.e. returning S_ACTION_CONT upon seeing SYS_fork, SYS_vfork, SYS_clone)
@@ -73,11 +73,11 @@ SPECIAL NOTICES
      bypass system call events that block such signals (i.e. returning S_ACTION
      _CONT without checking parameters of SYS_sigsetmask, SYS_pthread_sigmask, 
      etc.), libsandbox could fail to detect relevant out-of-quota events;
-  6. By default, the disk output quota only applies to persistent storage. 
-     Write operations to i) standard output buffer (i.e. stdout / stderr), ii) 
+  6. By default, the disk output quota only applies to eligible file systems. 
+     Write operations to i) standard output streams (i.e. stdout / stderr), ii) 
      null devices (i.e. /dev/null), or iii) pipelined to another process do NOT 
      count against the disk output quota. This default behaviour, however, 
-     could be overridden by user-specified policy modules.
+     could be overridden by user-specified policy modules;
   7. Since v0.3.5, libsandbox dedicates a manager thread to handle termination 
      signals including SIGTERM, SIGINT, and SIGQUIT. When the manager thread
      receives any of these signals, it sends the same signal to the *sandboxed*
@@ -90,18 +90,23 @@ SPECIAL NOTICES
      termination signals other than SIGTERM, SIGINT, and SIGQUIT, or if custom 
      signal handlers are registered such that they prevent the manager thread 
      of libsandbox from receiving the three termination signals, then there is
-     suspected risk that the *sandboxed* program may go beyond the control of 
+     suspected risk that the *sandboxed* program may escape the control of 
      libsandbox. In such cases, some of the restrictions placed by libsandbox,
      including quota limit and policy-based behaviour auditing, may become 
      invalid. However, OS-level security mechanisms, including chroot() jail 
-     and setuid() privileges, are still in effect.
-  9. libsandbox (v0.3.x) includes some optional features that can be enabled
+     and setuid() privileges, are still in effect;
+  9. libsandbox (v0.3.x) includes some optional features that can be enabled 
      during configuration. Please note that --enable-tsc and --enable-rtsched 
      are highly experimental, and are not recommended for production systems;
- 10. On some linux-2.6-x86_64 systems, to correctly inspect the system call mode
-     of some 32bit programs, it could be mandatory to build libsandbox (0.3.x) 
+ 10. On some linux-2.6-x86_64 systems, to correctly inspect the system call mode 
+     of some 32bit programs, it could be mandatory to build libsandbox (0.3.x)
      with --enable-chkvsc option (since 0.3.3-rc4). The binary packages for 
      x86_64 systems enabled this option by default;
+ 11. On some Linux systems, the default installation directory of libsandbox 
+     (aka. /usr/local/lib) is not a trusted directory for the runtime linker 
+     (aka. ld.so). It could be mandatory to build libsandbox (0.3.x) with 
+     --prefix and (or) --libdir options to override the default settings; The 
+     binary packages are built with --prefix=/usr by default;
 
 CONTACT
   

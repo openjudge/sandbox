@@ -28,8 +28,8 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE  *
  * POSSIBILITY OF SUCH DAMAGE.                                                 *
  ******************************************************************************/
-/** 
- * @file sandbox.h 
+/**
+ * @file sandbox.h
  * @brief Methods for creating and manipulating a sandbox object.
  */
 #ifndef __OJS_SANDBOX_H__
@@ -100,7 +100,7 @@ typedef struct
     int args[SBOX_ARG_MAX];     /**< arguments offset */
 } command_t;
 
-/** 
+/**
  * @brief Task quota type.
  */
 typedef enum
@@ -118,13 +118,13 @@ typedef enum
  */
 typedef rlim_t res_t;
 
-/** 
+/**
  * @brief Static specification of a task.
  */
 typedef struct
 {
     command_t comm;             /**< command (with arguments) to be executed */
-    char jail[SBOX_PATH_MAX];   /**< chroot to this path before running cmd */ 
+    char jail[SBOX_PATH_MAX];   /**< chroot to this path before running cmd */
     uid_t uid;                  /**< run command as this user */
     gid_t gid;                  /**< run command as member of this group */
     int ifd;                    /**< file descriptor for task input */
@@ -181,10 +181,10 @@ typedef struct
     int exitcode;               /**< exit code */
 } stat_t;
 
-/** 
- * @brief Types of sandbox execution status. 
+/**
+ * @brief Types of sandbox execution status.
  */
-typedef enum 
+typedef enum
 {
     S_STATUS_PRE       = 0,     /*!< Preparing (not ready to execute) */
     S_STATUS_RDY       = 1,     /*!< Ready (waiting for execution) */
@@ -193,8 +193,8 @@ typedef enum
     S_STATUS_FIN       = 4,     /*!< Finished */
 } status_t;
 
-/** 
- * @brief Types of sandbox execution result. 
+/**
+ * @brief Types of sandbox execution result.
  */
 typedef enum
 {
@@ -235,7 +235,7 @@ typedef enum
 typedef union
 {
     /* The *__bitmap__* field does not have corresponding event type, it is
-     * there to ensure that an instance of this union can be properly 
+     * there to ensure that an instance of this union can be properly
      * instantiated with braced initializer. */
     struct
     {
@@ -272,8 +272,8 @@ typedef union
     } _QUOTA;
 } event_data_t;
 
-/** 
- * @brief Structure for holding events and event-associated data. 
+/**
+ * @brief Structure for holding events and event-associated data.
  */
 typedef struct
 {
@@ -281,8 +281,8 @@ typedef struct
     event_data_t data;          /**< event data */
 } event_t;
 
-/** 
- * @brief Types of sandbox actions. 
+/**
+ * @brief Types of sandbox actions.
  */
 typedef enum
 {
@@ -292,8 +292,8 @@ typedef enum
     /* TODO identify other action types */
 } action_type_t;
 
-/** 
- * @brief Action specific data bindings. 
+/**
+ * @brief Action specific data bindings.
  */
 typedef union
 {
@@ -316,8 +316,8 @@ typedef union
     /* TODO add action-specific data structures */
 } action_data_t;
 
-/** 
- * @brief Structure for holding actions and action-associated data. 
+/**
+ * @brief Structure for holding actions and action-associated data.
  */
 typedef struct
 {
@@ -345,7 +345,7 @@ typedef struct
 typedef struct
 {
     void * entry;               /**< policy object entry point */
-    long data;                  /**< reserved data / control storage */    
+    long data;                  /**< reserved data / control storage */
 } policy_t;
 
 /**
@@ -369,7 +369,7 @@ typedef struct
     pthread_t tid;              /**< thread id of the worker when started */
 } worker_t;
 
-/** 
+/**
  * @brief Configurable controller of a sandbox object.
  */
 typedef struct
@@ -399,8 +399,8 @@ typedef struct
     bool wrlock;                /**< write locked */
 } lock_t;
 
-/** 
- * @brief Structure for collecting everything needed to run a sandbox. 
+/**
+ * @brief Structure for collecting everything needed to run a sandbox.
  */
 typedef struct
 {
@@ -412,7 +412,7 @@ typedef struct
     lock_t lock;                /**< rwlock for concurrency control */
 } sandbox_t;
 
-/** 
+/**
  * @brief Initialize a \c sandbox_t object.
  * @param[in,out] psbox pointer to the \c sandbox_t object to be initialized
  * @param[in] argv command line argument array of the targeted program
@@ -420,24 +420,24 @@ typedef struct
  */
 int sandbox_init(sandbox_t * psbox, const char * argv[]);
 
-/** 
+/**
  * @brief Destroy a \c sandbox_t object.
  * @param[in,out] psbox pointer to the \c sandbox_t object to be destroied
  * @return 0 on success
  */
 int sandbox_fini(sandbox_t * psbox);
 
-/** 
+/**
  * @brief Check if sandbox is ready to (re)start, update status accordingly.
  * @param[in,out] psbox pointer to the \c sandbox_t object to be checked
  * @return true on success
  * In order to restart a finished sandbox, the caller of this function must
- *   a) properly stop previous monitor (i.e. unlock the mutex), and 
+ *   a) properly stop previous monitor (i.e. unlock the mutex), and
  *   b) rewind / reopen / reset I/O channels of task specification
  */
 bool sandbox_check(sandbox_t * psbox);
 
-/** 
+/**
  * @brief Start executing the task binded with the sandbox.
  * @param[in,out] psbox pointer to the \c sandbox_t object to be started
  * @return pointer to the \c result field of \c psbox, or NULL on failure
@@ -450,7 +450,7 @@ result_t * sandbox_execute(sandbox_t * psbox);
  * @param[in] pevent pointer to the builtin \c event_t object of the sandbox
  * @param[out] paction pointer to the builtin \c action_t object of the sandbox
  */
-void sandbox_default_policy(const policy_t * ppolicy, const event_t * pevent, 
+void sandbox_default_policy(const policy_t * ppolicy, const event_t * pevent,
     action_t * paction);
 
 #ifdef __cplusplus
